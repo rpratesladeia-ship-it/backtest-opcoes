@@ -1,43 +1,81 @@
 <!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Backtest Opções — Scanner</title>
+<title>Backtest Opções — Scanner 30</title>
 <style>
 :root{--bg:#0e0e10;--card:#17171a;--gold:#d4af37;--txt:#eee;--mut:#999;--red:#e5484d;--grn:#3fb950}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,sans-serif;padding:16px;max-width:620px;margin:auto}
-h1{font-size:22px;color:var(--gold);margin:4px 0 2px}p.s{color:var(--mut);font-size:13px;margin:0 0 14px}
-.card{background:var(--card);border:1px solid #2a2a2f;border-radius:12px;padding:14px;margin-bottom:12px}
-label{display:block;font-size:12px;color:var(--mut);margin:8px 0 3px}
-select,input{width:100%;padding:10px;border-radius:8px;border:1px solid #333;background:#101012;color:var(--txt);font-size:15px}
-.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}button{width:100%;margin-top:14px;padding:14px;border:0;border-radius:10px;background:var(--gold);color:#111;font-weight:700;font-size:16px}
-button:disabled{opacity:.5}.big{font-size:28px;font-weight:700}.k{color:var(--mut);font-size:12px}.ver{padding:12px;border-radius:10px;font-size:14px;line-height:1.4;margin-bottom:12px}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,sans-serif;padding:16px;max-width:650px;margin:auto}
+h1{font-size:23px;color:var(--gold);margin:4px 0 2px}p.s{color:var(--mut);font-size:13px;margin:0 0 14px}
+.card{background:var(--card);border:1px solid #2a2a2f;border-radius:13px;padding:15px;margin-bottom:12px}
+label{display:block;font-size:13px;color:var(--mut);margin:8px 0 4px}
+select,input{width:100%;padding:12px;border-radius:9px;border:1px solid #333;background:#101012;color:var(--txt);font-size:16px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}button{width:100%;margin-top:13px;padding:15px;border:0;border-radius:10px;background:var(--gold);color:#111;font-weight:750;font-size:17px}
+button:disabled{opacity:.5}.secondary{background:#34343a;color:#fff}.big{font-size:30px;font-weight:800}.k{color:var(--mut);font-size:13px}.ver{padding:13px;border-radius:10px;font-size:14px;line-height:1.45;margin-bottom:12px}
 .bad{background:#2a1214;border:1px solid var(--red)}.ok{background:#12241a;border:1px solid var(--grn)}.warn{background:#2a2312;border:1px solid var(--gold)}
-.asset{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid #303036}.asset:last-child{border:0}.muted{color:var(--mut)}.tag{font-size:11px;border-radius:6px;padding:3px 7px;background:#29292e}
+.asset{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid #303036}.asset:last-child{border:0}.muted{color:var(--mut)}.tag{font-size:11px;border-radius:6px;padding:3px 7px;background:#29292e}
 </style></head><body>
-<h1>Backtest Opções — Scanner</h1>
-<p class="s">Procura automaticamente o melhor resultado entre BTC, ETH, BNB, SOL e XRP. Usa candles públicos da Binance e, se ela bloquear o servidor, tenta a OKX. Somente análise: não opera nem envia ordens.</p>
+<h1>Scanner de Oportunidades</h1>
+<p class="s">Pesquisa até 30 pares cripto com candles públicos da Binance e fallback OKX. Escolhe um único candidato com sinal atual. Operações abaixo são VIRTUAIS: não enviam ordens nem movimentam dinheiro.</p>
 <div class="card">
 <div class="row"><div><label>Timeframe</label><select id="interval"><option value="1m">M1</option><option value="5m">M5</option></select></div>
 <div><label>Expiração (velas)</label><input id="expiry" type="number" value="1" min="1" max="10"></div></div>
-<div class="row"><div><label>Payout (%)</label><input id="payout" type="number" value="85"></div>
+<div class="row"><div><label>Payout estimado (%)</label><input id="payout" type="number" value="85"></div>
 <div><label>ADX mínimo</label><input id="adxMin" type="number" value="20"></div></div>
 <div class="row"><div><label>Candles por ativo</label><input id="candles" type="number" value="1000" min="500" max="10000"></div>
 <div><label>RSI compra (≤)</label><input id="rsiLow" type="number" value="40"></div></div>
 <label>RSI venda (≥)</label><input id="rsiHigh" type="number" value="60">
-<button id="go">Procurar melhor ativo</button></div>
+<button id="scan">Pesquisar 30 ativos</button></div>
 <div id="out"></div>
 <script>
-const $=id=>document.getElementById(id), pct=x=>(x*100).toFixed(1)+'%';
-$('go').onclick=async()=>{const b=$('go');b.disabled=true;b.textContent='Analisando BTC, ETH, BNB, SOL e XRP...';$('out').innerHTML='<div class="ver warn">Baixando candles e avaliando os cinco ativos. Aguarde.</div>';
-const q=new URLSearchParams();['interval','expiry','payout','adxMin','candles','rsiLow','rsiHigh'].forEach(k=>q.set(k,$(k).value));
-try{const resp=await fetch('/api/scan?'+q),r=await resp.json();if(!resp.ok&&r.erro)throw new Error(r.erro);
-let html='';if(r.best){const best=r.results.find(x=>x.symbol===r.best),t=best.teste;
-html+='<div class="card"><div class="k">MELHOR RESULTADO RELATIVO</div><div class="big">'+r.best+'</div><div class="k">Fonte de candles: '+best.fonteDados+'</div><div class="k">Acerto no teste independente: '+pct(t.taxaAcerto)+' · '+t.entradas+' entradas</div><div class="k">Equilíbrio necessário: '+pct(t.pontoDeEquilibrio)+' · Resultado: '+t.resultadoUnidades.toFixed(1)+' unidades</div></div>';
-html+='<div class="ver '+(r.hasEvidence?'ok':'warn')+'">'+r.message+'</div>';}else html+='<div class="ver bad">'+r.message+'</div>';
-html+='<div class="card"><b>Comparação dos ativos</b>';
-for(const x of r.results){if(x.erro){html+='<div class="asset"><b>'+x.symbol+'</b><span class="muted">'+x.erro+'</span></div>';continue;}
-const t=x.teste, proof=t.entradas>=100&&t.intervalo95[0]>t.pontoDeEquilibrio;
-html+='<div class="asset"><div><b>'+x.symbol+'</b><div class="k">'+t.entradas+' entradas · '+t.vitorias+' vitórias / '+t.derrotas+' derrotas · '+x.fonteDados+'</div></div><div style="text-align:right"><b>'+pct(t.taxaAcerto)+'</b><div class="tag">'+(proof?'indício estatístico':'não comprovado')+'</div></div></div>';}
-html+='</div><div class="card"><div class="k">Os 30% mais recentes são o teste independente. A fonte dos candles é identificada em cada ativo. O ranking não garante lucro futuro.</div></div>';$('out').innerHTML=html;
-}catch(e){$('out').innerHTML='<div class="ver bad">Erro: '+e.message+'</div>';}
-b.disabled=false;b.textContent='Procurar melhor ativo';};
+const $=id=>document.getElementById(id),pct=x=>(x*100).toFixed(1)+'%',fmt=x=>Number(x).toLocaleString('pt-BR',{maximumFractionDigits:5});
+let currentCandidate=null,currentTradeId=null;
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+$('scan').onclick=async()=>{
+ const b=$('scan');b.disabled=true;b.textContent='Pesquisando 30 ativos...';currentCandidate=null;currentTradeId=null;
+ $('out').innerHTML='<div class="ver warn">Consultando candles reais, calculando RSI, ADX, EMA e comparando o histórico dos ativos. Pode levar alguns minutos.</div>';
+ const q=new URLSearchParams();['interval','expiry','payout','adxMin','candles','rsiLow','rsiHigh'].forEach(k=>q.set(k,$(k).value));
+ try{
+  const resp=await fetch('/api/scan?'+q),r=await resp.json();if(!resp.ok)throw new Error(r.error||r.erro||'Falha na pesquisa');
+  currentCandidate=r.best;
+  let html='<div class="card"><b>Resultado da pesquisa</b><div class="k">'+r.resultsCount+' de '+r.symbols.length+' ativos analisados · '+r.candidates+' candidatos com sinal atual</div></div>';
+  if(r.best){
+   const x=r.best,t=x.teste,s=x.signal;
+   html+='<div class="card"><div class="k">ÚNICA OPÇÃO SELECIONADA PELO SCANNER</div><div class="big">'+esc(x.symbol)+'</div><div class="big" style="color:var(--gold)">'+(x.direction==='CALL'?'CALL / COMPRA':'PUT / VENDA')+'</div><div class="k">Fonte: '+esc(x.fonteDados)+' · Timeframe: '+esc(r.interval)+'</div><div class="row"><div><div class="k">RSI</div><b>'+s.rsi+'</b></div><div><div class="k">ADX</div><b>'+s.adx+'</b></div></div><div class="k">EMA20: '+s.ema20+' · EMA50: '+s.ema50+'</div><hr style="border-color:#333"><div class="k">Backtest independente: '+pct(t.taxaAcerto)+' de acerto · '+t.entradas+' resultados contabilizados · equilíbrio '+pct(t.pontoDeEquilibrio)+'</div><div class="ver warn" style="margin-top:12px">Sinal técnico atual, não garantia de vitória. A amostra histórica ainda pode ser pequena; esta indicação não está certificada como lucrativa.</div><button id="openPaper">Fazer operação virtual</button><div class="k" style="margin-top:8px">Valor virtual fixo: 1 unidade. Nenhum dinheiro ou ordem real será usado.</div></div>';
+  }else html+='<div class="ver warn">Nenhum dos ativos apresentou sinal atual que passou pelos filtros. Não vamos forçar uma entrada. Tente novamente mais tarde ou analisar M5.</div>';
+  html+='<div class="card"><b>Resumo dos 30 ativos</b>';
+  for(const x of r.results){if(x.erro){html+='<div class="asset"><b>'+esc(x.symbol)+'</b><span class="muted">Dados indisponíveis</span></div>';continue;}
+   const sig=x.signal,tt=x.teste;html+='<div class="asset"><div><b>'+esc(x.symbol)+'</b><div class="k">'+(sig?sig.direction+' · RSI '+sig.rsi+' · ADX '+sig.adx:'Sem sinal agora')+' · '+tt.entradas+' resultados no teste</div></div><div class="tag">'+(sig?'sinal atual':'aguardar')+'</div></div>';
+  }
+  html+='</div>';$('out').innerHTML=html;
+  const open=$('openPaper');if(open)open.onclick=openPaper;
+ }catch(e){$('out').innerHTML='<div class="ver bad">Erro na pesquisa: '+esc(e.message)+'</div>';}
+ b.disabled=false;b.textContent='Pesquisar 30 ativos';
+};
+async function openPaper(){
+ const b=$('openPaper');b.disabled=true;b.textContent='Abrindo simulação...';
+ try{
+  const r=await fetch('/api/paper/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:currentCandidate.symbol,direction:currentCandidate.direction,interval:$('interval').value,expiry:$('expiry').value,payout:$('payout').value})}).then(x=>x.json());
+  if(!r.id)throw new Error(r.error||'Não foi possível abrir a simulação');
+  currentTradeId=r.id;
+  $('out').insertAdjacentHTML('afterbegin','<div class="card" id="trade"><div class="k">OPERAÇÃO VIRTUAL ABERTA</div><div class="big">'+esc(r.symbol)+' '+esc(r.direction)+'</div><div class="k">Entrada de referência: '+fmt(r.entry)+' · Fonte: '+esc(r.source)+'</div><div class="k">Expiração: '+r.expiry+' candle(s) · Stake virtual: 1 unidade</div><div class="ver warn" style="margin-top:10px">Aguardando o fechamento do candle de expiração. Depois toque em verificar resultado.</div><button class="secondary" id="checkPaper">Verificar resultado</button></div>');
+  $('checkPaper').onclick=checkPaper;
+  b.textContent='Simulação aberta';
+ }catch(e){b.disabled=false;b.textContent='Fazer operação virtual';alert(e.message);}
+}
+async function checkPaper(){
+ const b=$('checkPaper');b.disabled=true;b.textContent='Verificando mercado...';
+ try{
+  const r=await fetch('/api/paper/status?id='+encodeURIComponent(currentTradeId)).then(x=>x.json());
+  if(r.error)throw new Error(r.error);
+  const el=$('trade');
+  if(r.status==='SETTLED'){
+   const label=r.result==='WIN'?'VITÓRIA':r.result==='LOSS'?'DERROTA':'EMPATE';
+   const cls=r.result==='WIN'?'ok':r.result==='LOSS'?'bad':'warn';
+   el.innerHTML='<div class="k">RESULTADO DA OPERAÇÃO VIRTUAL</div><div class="big">'+label+'</div><div>'+esc(r.symbol)+' '+esc(r.direction)+'</div><div class="k">Entrada: '+fmt(r.entry)+' · Saída: '+fmt(r.exit)+'</div><div class="k">Resultado: '+(r.pnl>0?'+':'')+fmt(r.pnl)+' unidades virtuais · Fonte: '+esc(r.settlementSource||r.source)+'</div><div class="ver '+cls+'" style="margin-top:10px">Resultado calculado com candle fechado de mercado. Não é uma ordem executada em corretora.</div>';
+  }else{
+   const mins=Math.ceil((r.remainingMs||0)/60000);
+   el.querySelector('.ver').textContent='Ainda aguardando o fechamento do candle. Tempo estimado restante: '+mins+' minuto(s). '+(r.lastError?'Última consulta: '+r.lastError:'');
+   b.disabled=false;b.textContent='Verificar resultado';
+  }
+ }catch(e){b.disabled=false;b.textContent='Verificar resultado';alert(e.message);}
+}
 </script></body></html>

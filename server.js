@@ -2,126 +2,138 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { run } = require('./backtest');
+const { ema, rsi, adx } = require('./indicators');
 const PORT = process.env.PORT || 3000;
-const HOSTS = ['https://data-api.binance.vision', 'https://api.binance.com'];
-const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT'];
+const SYMBOLS = [
+  'BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT','ADAUSDT','DOGEUSDT','TRXUSDT','AVAXUSDT','LINKUSDT',
+  'DOTUSDT','LTCUSDT','BCHUSDT','UNIUSDT','ETCUSDT','NEARUSDT','APTUSDT','ARBUSDT','OPUSDT','ATOMUSDT',
+  'ICPUSDT','FILUSDT','INJUSDT','SUIUSDT','SEIUSDT','SHIBUSDT','PEPEUSDT','AAVEUSDT','RENDERUSDT','XLMUSDT'
+];
+const paperTrades = new Map();
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const intervalMs = interval => interval === '5m' ? 300000 : 60000;
 
 async function binanceKlines(symbol, interval, total) {
   let all = [], endTime = null;
   while (all.length < total) {
     const limit = Math.min(1000, total - all.length);
     let data = null, lastErr;
-    for (const host of HOSTS) {
+    for (const host of ['https://data-api.binance.vision','https://api.binance.com']) {
       try {
         const url = `${host}/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}` + (endTime ? `&endTime=${endTime}` : '');
-        const r = await fetch(url, { headers: { 'Accept': 'application/json', 'User-Agent': 'backtest-opcoes/1.1' } });
-        if (r.status === 418 || r.status === 429) throw new Error(`Binance HTTP ${r.status}: bloqueio temporário do IP`);
+        const r = await fetch(url, { headers: { 'Accept':'application/json','User-Agent':'backtest-opcoes/2.0' } });
+        if (r.status === 418 || r.status === 429) throw new Error(`Binance HTTP ${r.status}: bloqueio temporário`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        data = await r.json();
-        break;
+        data = await r.json(); break;
       } catch (e) { lastErr = e; }
     }
-    if (!data) throw new Error(lastErr ? lastErr.message : 'Falha na Binance');
+    if (!data) throw new Error(lastErr ? lastErr.message : 'Falha Binance');
     if (!Array.isArray(data) || !data.length) break;
-    all = data.concat(all);
-    endTime = data[0][0] - 1;
+    all = data.concat(all); endTime = data[0][0] - 1;
     if (data.length < limit) break;
-    await sleep(250);
+    await sleep(180);
   }
-  return { candles: all.map(k => ({ t: +k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4] })), source: 'Binance' };
+  const ms = intervalMs(interval), now = Date.now();
+  const candles = all.map(k => ({ t:+k[0], o:+k[1], h:+k[2], l:+k[3], c:+k[4], closed:(+k[0]+ms)<=now }))
+    .filter(k => k.closed);
+  return { candles, source:'Binance' };
 }
-
 async function okxKlines(symbol, interval, total) {
-  const instId = symbol.replace('USDT', '-USDT');
-  const bar = interval === '5m' ? '5m' : '1m';
+  const instId = symbol.replace('USDT','-USDT'), bar = interval === '5m' ? '5m' : '1m';
   let all = [], after = null;
   while (all.length < total) {
-    const limit = Math.min(300, total - all.length);
-    const url = new URL('https://www.okx.com/api/v5/market/candles');
-    url.searchParams.set('instId', instId);
-    url.searchParams.set('bar', bar);
-    url.searchParams.set('limit', String(limit));
-    if (after) url.searchParams.set('after', String(after));
-    const r = await fetch(url, { headers: { 'Accept': 'application/json', 'User-Agent': 'backtest-opcoes/1.1' } });
+    const limit = Math.min(300,total-all.length), url = new URL('https://www.okx.com/api/v5/market/candles');
+    url.searchParams.set('instId',instId); url.searchParams.set('bar',bar); url.searchParams.set('limit',String(limit));
+    if (after) url.searchParams.set('after',String(after));
+    const r = await fetch(url,{headers:{'Accept':'application/json','User-Agent':'backtest-opcoes/2.0'}});
     if (!r.ok) throw new Error(`OKX HTTP ${r.status}`);
     const payload = await r.json();
-    if (payload.code !== '0' || !Array.isArray(payload.data)) throw new Error(payload.msg || 'Resposta inválida da OKX');
-    const page = payload.data;
-    if (!page.length) break;
-    all = all.concat(page);
-    const oldest = Math.min(...page.map(k => +k[0]));
-    after = oldest - 1;
-    if (page.length < limit) break;
-    await sleep(120);
+    if (payload.code !== '0' || !Array.isArray(payload.data)) throw new Error(payload.msg || 'Resposta inválida OKX');
+    if (!payload.data.length) break;
+    all=all.concat(payload.data);
+    after=Math.min(...payload.data.map(k=>+k[0]))-1;
+    if (payload.data.length<limit) break;
+    await sleep(100);
   }
-  const candles = all
-    .filter(k => k[8] === '1')
-    .map(k => ({ t: +k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4] }))
-    .sort((a, b) => a.t - b.t);
-  const unique = candles.filter((k, i) => i === 0 || k.t !== candles[i - 1].t).slice(-total);
-  if (unique.length < Math.min(total, 100)) throw new Error(`OKX retornou apenas ${unique.length} candles fechados`);
-  return { candles: unique, source: 'OKX' };
+  const candles=all.filter(k=>k[8]==='1').map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4]}))
+    .sort((a,b)=>a.t-b.t);
+  const unique=candles.filter((k,i)=>i===0||k.t!==candles[i-1].t).slice(-total);
+  if(unique.length<Math.min(total,100)) throw new Error(`OKX retornou apenas ${unique.length} candles fechados`);
+  return {candles:unique,source:'OKX'};
 }
-
-async function klines(symbol, interval, total) {
-  try {
-    return await binanceKlines(symbol, interval, total);
-  } catch (binanceError) {
-    try {
-      return await okxKlines(symbol, interval, total);
-    } catch (okxError) {
-      throw new Error(`Binance: ${binanceError.message}; OKX: ${okxError.message}`);
-    }
+async function klines(symbol,interval,total){
+  try{return await binanceKlines(symbol,interval,total);}
+  catch(binanceError){try{return await okxKlines(symbol,interval,total);}
+    catch(okxError){throw new Error(`Binance: ${binanceError.message}; OKX: ${okxError.message}`);}}
+}
+const num=(v,d)=>v!==null&&v!==''&&Number.isFinite(+v)?+v:d;
+function params(q){return{expiry:Math.max(1,Math.min(10,num(q.get('expiry'),1))),payout:Math.max(1,Math.min(100,num(q.get('payout'),85))),adxMin:num(q.get('adxMin'),20),rsiLow:num(q.get('rsiLow'),40),rsiHigh:num(q.get('rsiHigh'),60)};}
+function signalFor(candles,P){
+  if(candles.length<80)return null;
+  const c=candles.map(x=>x.c),h=candles.map(x=>x.h),l=candles.map(x=>x.l);
+  const i=c.length-1,ef=ema(c,20),es=ema(c,50),R=rsi(c,14),A=adx(h,l,c,14);
+  if(ef[i]==null||es[i]==null||R[i]==null||A[i]==null)return null;
+  let direction=null;
+  if(ef[i]>es[i]&&A[i]>=P.adxMin&&R[i]<=P.rsiLow)direction='CALL';
+  else if(ef[i]<es[i]&&A[i]>=P.adxMin&&R[i]>=P.rsiHigh)direction='PUT';
+  if(!direction)return null;
+  return {direction,rsi:+R[i].toFixed(2),adx:+A[i].toFixed(2),ema20:+ef[i].toFixed(8),ema50:+es[i].toFixed(8),signalCandleTime:candles[i].t};
+}
+function json(res,code,obj){res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(obj));}
+function readBody(req){return new Promise((resolve,reject)=>{let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{try{resolve(JSON.parse(raw||'{}'));}catch(e){reject(e);}});req.on('error',reject);});}
+async function handle(req,res){
+ const u=new URL(req.url,'http://localhost');
+ if(u.pathname==='/api/health')return json(res,200,{ok:true,symbols:SYMBOLS,providers:['Binance','OKX'],mode:'paper-only'});
+ if(u.pathname==='/api/scan'&&req.method==='GET'){
+  const q=u.searchParams,interval=['1m','5m'].includes(q.get('interval'))?q.get('interval'):'1m';
+  const total=Math.max(500,Math.min(num(q.get('candles'),1000),10000)),P=params(q);
+  const results=new Array(SYMBOLS.length);let cursor=0;
+  async function worker(){while(true){const idx=cursor++;if(idx>=SYMBOLS.length)return;const symbol=SYMBOLS[idx];
+    try{const data=await klines(symbol,interval,total),bt=run(data.candles,P),signal=signalFor(data.candles,P);
+      results[idx]={symbol,interval,fonteDados:data.source,candles:data.candles.length,teste:bt.teste,treino:bt.treino,signal};}
+    catch(e){results[idx]={symbol,erro:e.message};}
+  }}
+  await Promise.all([worker(),worker(),worker(),worker()]);
+  const valid=results.filter(x=>!x.erro&&x.teste);
+  const candidates=valid.filter(x=>x.signal&&x.teste.entradas>=30);
+  candidates.sort((a,b)=>b.teste.esperancaPorEntrada-a.teste.esperancaPorEntrada);
+  const best=candidates[0]||null;
+  return json(res,200,{interval,symbols:SYMBOLS,results,best:best?{symbol:best.symbol,direction:best.signal.direction,fonteDados:best.fonteDados,candles:best.candles,signal:best.signal,teste:best.teste}:null,
+    message:best?'Candidato com sinal atual encontrado. Confirme os dados e use somente a operação virtual.':'Nenhum sinal atual passou pelos filtros. Não force uma operação.',resultsCount:valid.length,candidates:candidates.length,mode:'paper-only'});
+ }
+ if(u.pathname==='/api/paper/open'&&req.method==='POST'){
+  const body=await readBody(req),symbol=String(body.symbol||'').toUpperCase(),direction=body.direction;
+  const interval=['1m','5m'].includes(body.interval)?body.interval:'1m',expiry=Math.max(1,Math.min(10,num(body.expiry,1))),payout=Math.max(1,Math.min(100,num(body.payout,85)));
+  if(!SYMBOLS.includes(symbol)||!['CALL','PUT'].includes(direction))return json(res,400,{error:'Ativo ou direção inválidos.'});
+  const data=await klines(symbol,interval,120),last=data.candles[data.candles.length-1];
+  if(!last)return json(res,502,{error:'Sem candle fechado para iniciar a simulação.'});
+  const ms=intervalMs(interval),targetOpen=last.t+expiry*ms,settleAt=targetOpen+ms;
+  const id='paper_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8);
+  const trade={id,symbol,direction,interval,expiry,payout,entry:last.c,entryCandleTime:last.t,targetOpen,settleAt,source:data.source,status:'OPEN',createdAt:Date.now(),stake:1};
+  paperTrades.set(id,trade);
+  return json(res,200,{...trade,virtual:true,message:'Operação virtual aberta com preço de referência de candle fechado. Nenhuma ordem foi enviada.'});
+ }
+ if(u.pathname==='/api/paper/status'&&req.method==='GET'){
+  const id=u.searchParams.get('id'),trade=paperTrades.get(id);
+  if(!trade)return json(res,404,{error:'Operação não encontrada. A simulação fica guardada na memória desta instância.'});
+  if(trade.status==='OPEN'&&Date.now()>=trade.settleAt){
+    try{const data=await klines(trade.symbol,trade.interval,Math.min(200,trade.expiry+5));
+      const target=data.candles.find(c=>c.t===trade.targetOpen);
+      if(target){trade.exit=target.c;trade.exitCandleTime=target.t;trade.status='SETTLED';
+        trade.result=target.c===trade.entry?'TIE':(trade.direction==='CALL'?(target.c>trade.entry?'WIN':'LOSS'):(target.c<trade.entry?'WIN':'LOSS'));
+        trade.pnl=trade.result==='WIN'?trade.stake*trade.payout/100:trade.result==='LOSS'?-trade.stake:0;trade.settledAt=Date.now();trade.settlementSource=data.source;}
+    }catch(e){trade.lastError=e.message;}
   }
+  return json(res,200,{...trade,virtual:true,remainingMs:Math.max(0,trade.settleAt-Date.now())});
+ }
+ if(u.pathname==='/api/backtest'&&req.method==='GET'){
+  const q=u.searchParams,interval=['1m','5m'].includes(q.get('interval'))?q.get('interval'):'1m';
+  const total=Math.max(500,Math.min(num(q.get('candles'),5000),10000)),P=params(q);
+  const symbol=(q.get('symbol')||'BTCUSDT').toUpperCase().replace(/[^A-Z0-9]/g,'');
+  const data=await klines(symbol,interval,total);
+  return json(res,200,{symbol,interval,fonteDados:data.source,...run(data.candles,P)});
+ }
+ const file=path.join(__dirname,'public','index.html');res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});fs.createReadStream(file).pipe(res);
 }
-
-const num = (v, d) => (v !== null && v !== '' && Number.isFinite(+v) ? +v : d);
-function params(q) {
-  return { expiry: Math.max(1, Math.min(10, num(q.get('expiry'), 1))), payout: Math.max(1, Math.min(100, num(q.get('payout'), 85))),
-    adxMin: num(q.get('adxMin'), 20), rsiLow: num(q.get('rsiLow'), 40), rsiHigh: num(q.get('rsiHigh'), 60) };
-}
-function json(res, code, obj) { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); }
-
-const server = http.createServer(async (req, res) => {
-  const u = new URL(req.url, 'http://localhost');
-  if (u.pathname === '/api/health') return json(res, 200, { ok: true, symbols: SYMBOLS, providers: ['Binance', 'OKX'] });
-  if (u.pathname === '/api/backtest' || u.pathname === '/api/scan') {
-    const q = u.searchParams, interval = ['1m', '5m'].includes(q.get('interval')) ? q.get('interval') : '1m';
-    const total = Math.max(500, Math.min(num(q.get('candles'), u.pathname === '/api/scan' ? 1000 : 5000), 10000));
-    const P = params(q);
-    try {
-      if (u.pathname === '/api/backtest') {
-        const symbol = (q.get('symbol') || 'BTCUSDT').toUpperCase().replace(/[^A-Z0-9]/g, '');
-        const result = await klines(symbol, interval, total);
-        return json(res, 200, { symbol, interval, fonteDados: result.source, ...run(result.candles, P) });
-      }
-      const results = [];
-      for (const symbol of SYMBOLS) {
-        try {
-          const result = await klines(symbol, interval, total);
-          results.push({ symbol, interval, fonteDados: result.source, ...run(result.candles, P) });
-          await sleep(350);
-        } catch (e) { results.push({ symbol, erro: e.message }); }
-      }
-      const valid = results.filter(x => !x.erro && x.teste);
-      valid.sort((a, b) => {
-        const aProof = a.teste.entradas >= 100 && a.teste.intervalo95[0] > a.teste.pontoDeEquilibrio;
-        const bProof = b.teste.entradas >= 100 && b.teste.intervalo95[0] > b.teste.pontoDeEquilibrio;
-        if (aProof !== bProof) return aProof ? -1 : 1;
-        return b.teste.esperancaPorEntrada - a.teste.esperancaPorEntrada;
-      });
-      const best = valid[0] || null;
-      const hasEvidence = !!best && best.teste.entradas >= 100 && best.teste.intervalo95[0] > best.teste.pontoDeEquilibrio;
-      return json(res, 200, { interval, symbols: SYMBOLS, results, best: best ? best.symbol : null, hasEvidence,
-        message: valid.length ? (hasEvidence
-          ? 'Melhor candidato com indício estatístico. Ainda exige validação em outros períodos.'
-          : 'Melhor resultado relativo entre os ativos testados, mas sem vantagem estatística comprovada.')
-          : 'Nenhum ativo pôde ser analisado. Os provedores de candles não responderam.', resultsCount: valid.length });
-    } catch (e) { return json(res, 502, { erro: e.message }); }
-  }
-  const file = path.join(__dirname, 'public', 'index.html');
-  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-  fs.createReadStream(file).pipe(res);
-});
-server.listen(PORT, () => console.log('Backtest Opções scanner rodando na porta ' + PORT));
+const server=http.createServer((req,res)=>{handle(req,res).catch(e=>json(res,502,{error:e.message}));});
+server.listen(PORT,()=>console.log('Backtest Opções scanner 30 ativos / modo virtual na porta '+PORT));

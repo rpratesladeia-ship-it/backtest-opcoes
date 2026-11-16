@@ -1,4 +1,5 @@
 const http = require('http');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { run } = require('./backtest');
@@ -9,7 +10,9 @@ const SYMBOLS = [
   'DOTUSDT','LTCUSDT','BCHUSDT','UNIUSDT','ETCUSDT','NEARUSDT','APTUSDT','ARBUSDT','OPUSDT','ATOMUSDT',
   'ICPUSDT','FILUSDT','INJUSDT','SUIUSDT','SEIUSDT','SHIBUSDT','PEPEUSDT','AAVEUSDT','RENDERUSDT','XLMUSDT'
 ];
-const paperTrades = new Map();
+const PAPER_SECRET = process.env.PAPER_TRADE_SECRET || 'backtest-opcoes-paper-trade-v1';
+function encodeTrade(trade){const payload=Buffer.from(JSON.stringify(trade)).toString('base64url');const sig=crypto.createHmac('sha256',PAPER_SECRET).update(payload).digest('base64url');return payload+'.'+sig;}
+function decodeTrade(token){try{const [payload,sig]=String(token||'').split('.');if(!payload||!sig)return null;const expected=crypto.createHmac('sha256',PAPER_SECRET).update(payload).digest();const received=Buffer.from(sig,'base64url');if(received.length!==expected.length||!crypto.timingSafeEqual(received,expected))return null;const trade=JSON.parse(Buffer.from(payload,'base64url').toString('utf8'));if(!trade.id||!SYMBOLS.includes(trade.symbol)||!['CALL','PUT'].includes(trade.direction))return null;return trade;}catch{return null;}}
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const intervalMs = interval => interval === '5m' ? 300000 : 60000;
 
@@ -108,23 +111,24 @@ async function handle(req,res){
   const data=await klines(symbol,interval,120),last=data.candles[data.candles.length-1];
   if(!last)return json(res,502,{error:'Sem candle fechado para iniciar a simulação.'});
   const ms=intervalMs(interval),targetOpen=last.t+expiry*ms,settleAt=targetOpen+ms;
-  const id='paper_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8);
-  const trade={id,symbol,direction,interval,expiry,payout,entry:last.c,entryCandleTime:last.t,targetOpen,settleAt,source:data.source,status:'OPEN',createdAt:Date.now(),stake:1};
-  paperTrades.set(id,trade);
-  return json(res,200,{...trade,virtual:true,message:'Operação virtual aberta com preço de referência de candle fechado. Nenhuma ordem foi enviada.'});
+  const trade={symbol,direction,interval,expiry,payout,entry:last.c,entryCandleTime:last.t,targetOpen,settleAt,source:data.source,status:'OPEN',createdAt:Date.now(),stake:1};
+  trade.id=encodeTrade(trade);
+  return json(res,200,{...trade,virtual:true,message:'Operação virtual aberta. O identificador assinado permite recuperar a simulação mesmo após reinício do servidor.'});
  }
  if(u.pathname==='/api/paper/status'&&req.method==='GET'){
-  const id=u.searchParams.get('id'),trade=paperTrades.get(id);
-  if(!trade)return json(res,404,{error:'Operação não encontrada. A simulação fica guardada na memória desta instância.'});
-  if(trade.status==='OPEN'&&Date.now()>=trade.settleAt){
+  const id=u.searchParams.get('id'),trade=decodeTrade(id);
+  if(!trade)return json(res,404,{error:'Identificador da operação inválido ou incompleto.'});
+  const result={...trade,virtual:true,remainingMs:Math.max(0,trade.settleAt-Date.now())};
+  if(Date.now()>=trade.settleAt){
     try{const data=await klines(trade.symbol,trade.interval,Math.min(200,trade.expiry+5));
       const target=data.candles.find(c=>c.t===trade.targetOpen);
-      if(target){trade.exit=target.c;trade.exitCandleTime=target.t;trade.status='SETTLED';
-        trade.result=target.c===trade.entry?'TIE':(trade.direction==='CALL'?(target.c>trade.entry?'WIN':'LOSS'):(target.c<trade.entry?'WIN':'LOSS'));
-        trade.pnl=trade.result==='WIN'?trade.stake*trade.payout/100:trade.result==='LOSS'?-trade.stake:0;trade.settledAt=Date.now();trade.settlementSource=data.source;}
-    }catch(e){trade.lastError=e.message;}
+      if(target){result.exit=target.c;result.exitCandleTime=target.t;result.status='SETTLED';
+        result.result=target.c===trade.entry?'TIE':(trade.direction==='CALL'?(target.c>trade.entry?'WIN':'LOSS'):(target.c<trade.entry?'WIN':'LOSS'));
+        result.pnl=result.result==='WIN'?trade.stake*trade.payout/100:result.result==='LOSS'?-trade.stake:0;result.settledAt=Date.now();result.settlementSource=data.source;}
+      else result.lastError='O candle de expiração ainda não foi disponibilizado pela fonte de dados.';
+    }catch(e){result.lastError=e.message;}
   }
-  return json(res,200,{...trade,virtual:true,remainingMs:Math.max(0,trade.settleAt-Date.now())});
+  return json(res,200,result);
  }
  if(u.pathname==='/api/backtest'&&req.method==='GET'){
   const q=u.searchParams,interval=['1m','5m'].includes(q.get('interval'))?q.get('interval'):'1m';

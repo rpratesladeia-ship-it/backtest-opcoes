@@ -98,8 +98,13 @@ async function handle(req,res){
   }}
   await Promise.all([worker(),worker(),worker(),worker()]);
   const valid=results.filter(x=>!x.erro&&x.teste);
-  const candidates=valid.filter(x=>x.signal&&x.teste.entradas>=5);
-  candidates.sort((a,b)=>b.teste.esperancaPorEntrada-a.teste.esperancaPorEntrada);
+  const excluded=new Set((q.get('exclude')||'').split(',').map(x=>x.trim().toUpperCase()).filter(Boolean));
+  const candidates=valid.filter(x=>x.signal&&x.teste.entradas>=5&&!excluded.has(x.symbol));
+  candidates.sort((a,b)=>{
+    const edge=(b.teste.esperancaPorEntrada||0)-(a.teste.esperancaPorEntrada||0);
+    if(Math.abs(edge)>0.000001)return edge;
+    return b.signal.signalCandleTime-a.signal.signalCandleTime;
+  });
   const best=candidates[0]||null;
   return json(res,200,{interval,symbols:SYMBOLS,results,best:best?{symbol:best.symbol,direction:best.signal.direction,fonteDados:best.fonteDados,candles:best.candles,signal:best.signal,teste:best.teste}:null,
     message:best?'Candidato com sinal atual encontrado. Confirme os dados e use somente a operação virtual.':'Nenhum sinal atual passou pelos filtros. Não force uma operação.',resultsCount:valid.length,candidates:candidates.length,mode:'paper-only'});

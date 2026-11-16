@@ -14,7 +14,7 @@ button:disabled{opacity:.5}.big{font-size:28px;font-weight:700}.k{color:var(--mu
 .asset{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid #303036}.asset:last-child{border:0}.muted{color:var(--mut)}.tag{font-size:11px;border-radius:6px;padding:3px 7px;background:#29292e}
 </style></head><body>
 <h1>Backtest Opções — Scanner</h1>
-<p class="s">Procura automaticamente o melhor resultado entre BTC, ETH, BNB, SOL e XRP usando candles da Binance. Somente análise: não opera nem envia ordens.</p>
+<p class="s">Procura automaticamente o melhor resultado entre BTC, ETH, BNB, SOL e XRP. Usa candles públicos da Binance e, se ela bloquear o servidor, tenta a OKX. Somente análise: não opera nem envia ordens.</p>
 <div class="card">
 <div class="row"><div><label>Timeframe</label><select id="interval"><option value="1m">M1</option><option value="5m">M5</option></select></div>
 <div><label>Expiração (velas)</label><input id="expiry" type="number" value="1" min="1" max="10"></div></div>
@@ -31,13 +31,13 @@ $('go').onclick=async()=>{const b=$('go');b.disabled=true;b.textContent='Analisa
 const q=new URLSearchParams();['interval','expiry','payout','adxMin','candles','rsiLow','rsiHigh'].forEach(k=>q.set(k,$(k).value));
 try{const resp=await fetch('/api/scan?'+q),r=await resp.json();if(!resp.ok&&r.erro)throw new Error(r.erro);
 let html='';if(r.best){const best=r.results.find(x=>x.symbol===r.best),t=best.teste;
-html+='<div class="card"><div class="k">MELHOR RESULTADO RELATIVO</div><div class="big">'+r.best+'</div><div class="k">Acerto no teste independente: '+pct(t.taxaAcerto)+' · '+t.entradas+' entradas</div><div class="k">Equilíbrio necessário: '+pct(t.pontoDeEquilibrio)+' · Resultado: '+t.resultadoUnidades.toFixed(1)+' unidades</div></div>';
+html+='<div class="card"><div class="k">MELHOR RESULTADO RELATIVO</div><div class="big">'+r.best+'</div><div class="k">Fonte de candles: '+best.fonteDados+'</div><div class="k">Acerto no teste independente: '+pct(t.taxaAcerto)+' · '+t.entradas+' entradas</div><div class="k">Equilíbrio necessário: '+pct(t.pontoDeEquilibrio)+' · Resultado: '+t.resultadoUnidades.toFixed(1)+' unidades</div></div>';
 html+='<div class="ver '+(r.hasEvidence?'ok':'warn')+'">'+r.message+'</div>';}else html+='<div class="ver bad">'+r.message+'</div>';
 html+='<div class="card"><b>Comparação dos ativos</b>';
 for(const x of r.results){if(x.erro){html+='<div class="asset"><b>'+x.symbol+'</b><span class="muted">'+x.erro+'</span></div>';continue;}
 const t=x.teste, proof=t.entradas>=100&&t.intervalo95[0]>t.pontoDeEquilibrio;
-html+='<div class="asset"><div><b>'+x.symbol+'</b><div class="k">'+t.entradas+' entradas · '+t.vitorias+' vitórias / '+t.derrotas+' derrotas</div></div><div style="text-align:right"><b>'+pct(t.taxaAcerto)+'</b><div class="tag">'+(proof?'indício estatístico':'não comprovado')+'</div></div></div>';}
-html+='</div><div class="card"><div class="k">Os 30% mais recentes são o teste independente. O ranking não garante lucro futuro.</div></div>';$('out').innerHTML=html;
+html+='<div class="asset"><div><b>'+x.symbol+'</b><div class="k">'+t.entradas+' entradas · '+t.vitorias+' vitórias / '+t.derrotas+' derrotas · '+x.fonteDados+'</div></div><div style="text-align:right"><b>'+pct(t.taxaAcerto)+'</b><div class="tag">'+(proof?'indício estatístico':'não comprovado')+'</div></div></div>';}
+html+='</div><div class="card"><div class="k">Os 30% mais recentes são o teste independente. A fonte dos candles é identificada em cada ativo. O ranking não garante lucro futuro.</div></div>';$('out').innerHTML=html;
 }catch(e){$('out').innerHTML='<div class="ver bad">Erro: '+e.message+'</div>';}
 b.disabled=false;b.textContent='Procurar melhor ativo';};
 </script></body></html>

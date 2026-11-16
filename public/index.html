@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backtest honesto</title>
+<style>
+  :root { --bg:#0e0e10; --card:#17171a; --gold:#d4af37; --txt:#eee; --mut:#999; --red:#e5484d; --grn:#3fb950; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font-family:system-ui,sans-serif; padding:16px; max-width:560px; margin:auto; }
+  h1 { font-size:20px; color:var(--gold); margin:4px 0 2px; }
+  p.s { color:var(--mut); font-size:13px; margin:0 0 14px; }
+  .card { background:var(--card); border:1px solid #2a2a2f; border-radius:12px; padding:14px; margin-bottom:12px; }
+  label { display:block; font-size:12px; color:var(--mut); margin:8px 0 3px; }
+  select,input { width:100%; padding:10px; border-radius:8px; border:1px solid #333; background:#101012; color:var(--txt); font-size:15px; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  button { width:100%; margin-top:14px; padding:13px; border:0; border-radius:10px; background:var(--gold); color:#111; font-weight:700; font-size:16px; }
+  button:disabled { opacity:.5; }
+  .big { font-size:28px; font-weight:700; }
+  .k { color:var(--mut); font-size:12px; }
+  .v { margin-bottom:8px; }
+  .ver { padding:12px; border-radius:10px; font-size:14px; line-height:1.4; }
+  .bad { background:#2a1214; border:1px solid var(--red); }
+  .ok { background:#12241a; border:1px solid var(--grn); }
+  .warn { background:#2a2312; border:1px solid var(--gold); }
+</style>
+</head>
+<body>
+<h1>Backtest honesto</h1>
+<p class="s">Testa a estratégia RSI + ADX + EMA em candles reais. Só análise: não opera nem envia ordens.</p>
+
+<div class="card">
+  <div class="row">
+    <div><label>Ativo (cripto)</label>
+      <select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option><option>SOLUSDT</option><option>XRPUSDT</option></select></div>
+    <div><label>Timeframe</label><select id="interval"><option value="1m">M1</option><option value="5m">M5</option></select></div>
+  </div>
+  <div class="row">
+    <div><label>Expiração (velas)</label><input id="expiry" type="number" value="1" min="1" max="10"></div>
+    <div><label>Payout da corretora (%)</label><input id="payout" type="number" value="85"></div>
+  </div>
+  <div class="row">
+    <div><label>ADX mínimo</label><input id="adxMin" type="number" value="20"></div>
+    <div><label>Candles analisados</label><input id="candles" type="number" value="5000" max="10000"></div>
+  </div>
+  <div class="row">
+    <div><label>RSI de compra (≤)</label><input id="rsiLow" type="number" value="40"></div>
+    <div><label>RSI de venda (≥)</label><input id="rsiHigh" type="number" value="60"></div>
+  </div>
+  <button id="go">Rodar backtest</button>
+</div>
+
+<div id="out"></div>
+
+<script>
+const pct = x => (x * 100).toFixed(1) + '%';
+const $ = id => document.getElementById(id);
+$('go').onclick = async () => {
+  const b = $('go'); b.disabled = true; b.textContent = 'Baixando candles e testando...';
+  const q = new URLSearchParams();
+  ['symbol','interval','expiry','payout','adxMin','rsiLow','rsiHigh','candles'].forEach(k => q.set(k, $(k).value));
+  try {
+    const r = await (await fetch('/api/backtest?' + q)).json();
+    if (r.erro) throw new Error(r.erro);
+    const t = r.teste, cls = r.veredito.startsWith('Sem vantagem') ? 'bad' : r.veredito.startsWith('Há indício') ? 'ok' : 'warn';
+    $('out').innerHTML = `
+      <div class="card"><div class="k">Taxa de acerto no TESTE (dados que a estratégia não viu)</div>
+        <div class="big">${pct(t.taxaAcerto)}</div>
+        <div class="k">Margem de erro 95%: ${pct(t.intervalo95[0])} a ${pct(t.intervalo95[1])}</div>
+        <div class="k">Precisa de ${pct(t.pontoDeEquilibrio)} só para empatar (payout ${r.parametros.payout}%)</div>
+        <div class="k">${t.vitorias} vitórias, ${t.derrotas} derrotas, ${t.empates} empates</div></div>
+      <div class="ver ${cls}">${r.veredito}</div>
+      <div class="card" style="margin-top:12px">
+        <div class="k">Treino (70% mais antigo)</div><div class="v">${pct(r.treino.taxaAcerto)} em ${r.treino.entradas} entradas</div>
+        <div class="k">Resultado do teste (em entradas de valor 1)</div><div class="v">${t.resultadoUnidades.toFixed(1)}</div>
+        <div class="k">Referência: apostar sempre em alta</div><div class="v">${pct(r.sempreCall.taxaAcerto)}</div>
+        <div class="k">${r.candles} candles de ${r.symbol} (${r.interval})</div></div>`;
+  } catch (e) { $('out').innerHTML = '<div class="ver bad">Erro: ' + e.message + '</div>'; }
+  b.disabled = false; b.textContent = 'Rodar backtest';
+};
+</script>
+</body>
+</html>

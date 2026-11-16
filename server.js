@@ -95,7 +95,7 @@ async function handle(req,res){
   }}
   await Promise.all([worker(),worker(),worker(),worker()]);
   const valid=results.filter(x=>!x.erro&&x.teste);
-  const candidates=valid.filter(x=>x.signal&&x.teste.entradas>=30);
+  const candidates=valid.filter(x=>x.signal&&x.teste.entradas>=5);
   candidates.sort((a,b)=>b.teste.esperancaPorEntrada-a.teste.esperancaPorEntrada);
   const best=candidates[0]||null;
   return json(res,200,{interval,symbols:SYMBOLS,results,best:best?{symbol:best.symbol,direction:best.signal.direction,fonteDados:best.fonteDados,candles:best.candles,signal:best.signal,teste:best.teste}:null,

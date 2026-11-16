@@ -36,14 +36,13 @@ $('stop').onclick=()=>{scanning=false;if(timer)clearTimeout(timer);timer=null;se
 async function scanOnce(){
  if(!scanning)return;scanCount++;
  $('status').textContent='Varredura '+scanCount+': analisando 30 ativos e cruzando os indicadores. A pesquisa continuará automaticamente se não houver sinal.';
- $('go').disabled=true;
  try{
   const resp=await fetch('/api/scan?'+params()),r=await resp.json();if(!resp.ok)throw new Error(r.error||r.erro||'Falha na pesquisa');
   if(r.best){scanning=false;setState(false);currentCandidate=r.best;renderCandidate(r);return;}
   $('summary').innerHTML='<b>'+r.resultsCount+' de '+r.symbols.length+' ativos consultados</b><div class="k">Nenhum sinal confirmado nesta varredura. Próxima pesquisa automática em 30 segundos.</div>';
   $('details').innerHTML=renderAssets(r.results);
  }catch(e){$('summary').innerHTML='<div class="ver bad">Falha temporária: '+esc(e.message)+'. O radar tentará novamente.</div>';}
- finally{$('go').disabled=false;}
+ finally{}
  if(scanning)timer=setTimeout(scanOnce,30000);
 }
 function renderAssets(results){let html='';for(const x of results){if(x.erro){html+='<div class="asset"><b>'+esc(x.symbol)+'</b><span class="muted">dados indisponíveis</span></div>';continue;}const sig=x.signal;html+='<div class="asset"><div><b>'+esc(x.symbol)+'</b><div class="k">'+(sig?sig.direction+' · RSI '+sig.rsi+' · ADX '+sig.adx:'Sem sinal neste momento')+'</div></div><div class="tag">'+(sig?'sinal':'monitorando')+'</div></div>';}return html;}

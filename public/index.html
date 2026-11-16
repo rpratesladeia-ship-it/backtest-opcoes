@@ -31,9 +31,9 @@ button:disabled{opacity:.5}.secondary{background:#34343a;color:#fff}.big{font-si
 <div id="out"></div>
 <script>
 const $=id=>document.getElementById(id),pct=x=>(x*100).toFixed(1)+'%',fmt=x=>Number(x).toLocaleString('pt-BR',{maximumFractionDigits:8});
-let scanning=false,timer=null,currentCandidate=null,currentTradeId=null,scanCount=0;
+let scanning=false,timer=null,currentCandidate=null,currentTradeId=null,scanCount=0,resultTimer=null,tradeCheckTimer=null;\nlet usedAssets=new Set();\ntry{usedAssets=new Set(JSON.parse(localStorage.getItem('radarUsedAssets')||'[]'));}catch{}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function params(){const q=new URLSearchParams();['interval','expiry','payout','adxMin','candles','rsiLow','rsiHigh'].forEach(k=>q.set(k,$(k).value));return q;}
+function params(){const q=new URLSearchParams();['interval','expiry','payout','adxMin','candles','rsiLow','rsiHigh'].forEach(k=>q.set(k,$(k).value));q.set('exclude',[...usedAssets].join(','));return q;}
 function setState(on){scanning=on;$('start').style.display=on?'none':'block';$('stop').style.display=on?'block':'none';}
 $('start').onclick=()=>{if(scanning)return;scanCount=0;setState(true);scanOnce();};
 $('stop').onclick=()=>{scanning=false;if(timer)clearTimeout(timer);timer=null;setState(false);$('status').textContent='Pesquisa pausada por você.';};
@@ -42,7 +42,7 @@ async function scanOnce(){
  $('status').textContent='Varredura '+scanCount+': analisando 30 ativos e cruzando os indicadores. A pesquisa continuará automaticamente se não houver sinal.';
  try{
   const resp=await fetch('/api/scan?'+params()),r=await resp.json();if(!resp.ok)throw new Error(r.error||r.erro||'Falha na pesquisa');
-  if(r.best){scanning=false;setState(false);currentCandidate=r.best;renderCandidate(r);return;}
+  if(r.best){scanning=false;setState(false);currentCandidate=r.best;usedAssets.add(r.best.symbol);localStorage.setItem('radarUsedAssets',JSON.stringify([...usedAssets]));renderCandidate(r);return;}
   $('summary').innerHTML='<b>'+r.resultsCount+' de '+r.symbols.length+' ativos consultados</b><div class="k">Nenhum sinal confirmado nesta varredura. Próxima pesquisa automática em 30 segundos.</div>';
   $('details').innerHTML=renderAssets(r.results);
  }catch(e){$('summary').innerHTML='<div class="ver bad">Falha temporária: '+esc(e.message)+'. O radar tentará novamente.</div>';}
@@ -66,13 +66,13 @@ async function confirmStart(){
   const r=await fetch('/api/paper/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:x.symbol,direction:x.direction,interval:$('interval').value,expiry:$('expiry').value,payout:$('payout').value})}).then(v=>v.json());
   if(!r.id)throw new Error(r.error||'Não foi possível abrir a simulação');
   currentTradeId=r.id;$('summary').innerHTML='<div class="k">ENTRADA VIRTUAL GERADA APÓS SUA CONFIRMAÇÃO</div><div class="big">'+esc(r.symbol)+' '+esc(r.direction)+'</div><div class="k">Preço de referência: '+fmt(r.entry)+' · Fonte: '+esc(r.source)+'</div><div class="k">Expiração: '+r.expiry+' vela(s) · Valor virtual: 1 unidade</div><div id="tradeStatus" class="ver warn" style="margin-top:10px">Aguardando o fechamento do candle de expiração.</div><button id="checkPaper">Verificar resultado</button>';
-  $('checkPaper').onclick=checkPaper;$('status').textContent='Entrada virtual aberta. O radar está pausado até você decidir continuar.';
+  $('checkPaper').onclick=checkPaper;$('status').textContent='Entrada virtual aberta. O resultado será consultado automaticamente após a expiração.';\n  if(tradeCheckTimer)clearInterval(tradeCheckTimer);tradeCheckTimer=setInterval(()=>checkPaper(true),5000);
  }catch(e){$('summary').insertAdjacentHTML('beforeend','<div class="ver bad">'+esc(e.message)+'</div><button id="resume" class="secondary">Voltar a pesquisar</button>');$('resume').onclick=()=>{setState(true);scanOnce();};}
 }
 async function checkPaper(){
  const b=$('checkPaper');b.disabled=true;b.textContent='Consultando candle de fechamento...';
  try{const r=await fetch('/api/paper/status?id='+encodeURIComponent(currentTradeId)).then(v=>v.json());if(r.error)throw new Error(r.error);
- if(r.status==='SETTLED'){const label=r.result==='WIN'?'VITÓRIA':r.result==='LOSS'?'DERROTA':'EMPATE',cls=r.result==='WIN'?'ok':r.result==='LOSS'?'bad':'warn';
+ if(r.status==='SETTLED'){if(tradeCheckTimer){clearInterval(tradeCheckTimer);tradeCheckTimer=null;}const label=r.result==='WIN'?'VITÓRIA':r.result==='LOSS'?'DERROTA':'EMPATE',cls=r.result==='WIN'?'ok':r.result==='LOSS'?'bad':'warn';
  const mood=r.result==='WIN'?'win':r.result==='LOSS'?'loss':'tie';
  const eyes=r.result==='LOSS'?'<path d="M82 57 l12 10 m0 -10 l-12 10 M116 57 l12 10 m0 -10 l-12 10" stroke="#ef6268" stroke-width="5" stroke-linecap="round"/>':'<circle cx="88" cy="62" r="6" fill="#d9f5ff"/><circle cx="122" cy="62" r="6" fill="#d9f5ff"/>';
  const mouth=r.result==='WIN'?'<path d="M91 82 Q110 102 129 82" fill="none" stroke="#37c978" stroke-width="6" stroke-linecap="round"/>':r.result==='LOSS'?'<path d="M91 94 Q110 76 129 94" fill="none" stroke="#ef6268" stroke-width="6" stroke-linecap="round"/>':'<path d="M96 88 H124" stroke="#d4af37" stroke-width="6" stroke-linecap="round"/>';

@@ -86,7 +86,11 @@ function json(res,code,obj){res.writeHead(code,{'Content-Type':'application/json
 function readBody(req){return new Promise((resolve,reject)=>{let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{try{resolve(JSON.parse(raw||'{}'));}catch(e){reject(e);}});req.on('error',reject);});}
 async function handle(req,res){
  const u=new URL(req.url,'http://localhost');
- if(u.pathname==='/api/health')return json(res,200,{ok:true,symbols:SYMBOLS,providers:['Binance','OKX'],mode:'paper-only'});
+ if(u.pathname==='/api/health')return json(res,200,{ok:true,symbols:SYMBOLS,providers:['Binance','OKX'],mode:'paper-only',journal:{retentionDays:journal.retentionDays,enabled:true}});
+ if(u.pathname==='/api/journal'&&req.method==='GET'){
+  const [stats,entries]=await Promise.all([journal.stats(),journal.list({limit:u.searchParams.get('limit')||500,kind:u.searchParams.get('kind')||null})]);
+  return json(res,200,{stats,entries});
+ }
  if(u.pathname==='/api/scan'&&req.method==='GET'){
   const q=u.searchParams,interval=['1m','5m'].includes(q.get('interval'))?q.get('interval'):'1m';
   const total=Math.max(500,Math.min(num(q.get('candles'),1000),10000)),P=params(q);
@@ -97,6 +101,8 @@ async function handle(req,res){
     catch(e){results[idx]={symbol,erro:e.message};}
   }}
   await Promise.all([worker(),worker(),worker(),worker()]);
+  const scanId=crypto.randomUUID(), analyzedAt=Date.now();
+  await Promise.all(results.map(x=>journal.save({id:'analysis:'+scanId+':'+x.symbol,kind:'analysis',scanId,createdAt:analyzedAt,symbol:x.symbol,interval,market:'OPEN',source:x.fonteDados||null,candles:x.candles||0,signal:x.signal||null,backtest:x.teste||null,error:x.erro||null})));
   const valid=results.filter(x=>!x.erro&&x.teste);
   const excluded=new Set((q.get('exclude')||'').split(',').map(x=>x.trim().toUpperCase()).filter(Boolean));
   const candidates=valid.filter(x=>x.signal&&x.teste.entradas>=5&&!excluded.has(x.symbol));
@@ -106,6 +112,7 @@ async function handle(req,res){
     return b.signal.signalCandleTime-a.signal.signalCandleTime;
   });
   const best=candidates[0]||null;
+  if(best) await journal.save({id:'opportunity:'+scanId,kind:'opportunity',scanId,createdAt:analyzedAt,symbol:best.symbol,interval,market:'OPEN',source:best.fonteDados,direction:best.signal.direction,signal:best.signal,backtest:best.teste});
   return json(res,200,{interval,symbols:SYMBOLS,results,best:best?{symbol:best.symbol,direction:best.signal.direction,fonteDados:best.fonteDados,candles:best.candles,signal:best.signal,teste:best.teste}:null,
     message:best?'Candidato com sinal atual encontrado. Confirme os dados e use somente a operação virtual.':'Nenhum sinal atual passou pelos filtros. Não force uma operação.',resultsCount:valid.length,candidates:candidates.length,mode:'paper-only'});
  }
@@ -119,6 +126,7 @@ async function handle(req,res){
   const stake=Math.max(1,Math.min(1000,num(body.stake,5))),g1Enabled=body.g1Enabled===true;
   const trade={symbol,direction,interval,expiry,payout,entry:last.c,entryCandleTime:last.t,targetOpen,settleAt,source:data.source,status:'OPEN',createdAt:Date.now(),stake,g1Enabled,recovery:false,maxRecoveryMultiplier:2,targetExtra:stake*0.10};
   trade.id=encodeTrade(trade);
+  await journal.save({id:'operation:'+trade.id,kind:'operation',tradeId:trade.id,symbol,interval,market:'OPEN',direction,stake,payout,entry:trade.entry,source:trade.source,status:'OPEN',result:null,recovery:false,createdAt:trade.createdAt});
   return json(res,200,{...trade,virtual:true,message:'Operação virtual aberta. O identificador assinado permite recuperar a simulação mesmo após reinício do servidor.'});
  }
  if(u.pathname==='/api/paper/recovery'&&req.method==='POST'){
@@ -135,6 +143,7 @@ async function handle(req,res){
   const ms=intervalMs(parent.interval),targetOpen=last.t+parent.expiry*ms;
   const trade={symbol:parent.symbol,direction:parent.direction,interval:parent.interval,expiry:parent.expiry,payout:parent.payout,entry:last.c,entryCandleTime:last.t,targetOpen,settleAt:targetOpen+ms,source:data.source,status:'OPEN',createdAt:Date.now(),stake,g1Enabled:false,recovery:true,parentId:parent.id,maxRecoveryMultiplier:2,targetExtra:parent.targetExtra};
   trade.id=encodeTrade(trade);
+  await journal.save({id:'operation:'+trade.id,kind:'operation',tradeId:trade.id,parentId:parent.id,symbol:trade.symbol,interval:trade.interval,market:'OPEN',direction:trade.direction,stake:trade.stake,payout:trade.payout,entry:trade.entry,source:trade.source,status:'OPEN',result:null,recovery:true,createdAt:trade.createdAt});
   return json(res,200,{...trade,virtual:true,message:'G1 virtual aberta automaticamente; nenhuma ordem real foi enviada.'});
  }
  if(u.pathname==='/api/paper/status'&&req.method==='GET'){
@@ -147,6 +156,7 @@ async function handle(req,res){
       if(target){result.exit=target.c;result.exitCandleTime=target.t;result.status='SETTLED';
         result.result=target.c===trade.entry?'TIE':(trade.direction==='CALL'?(target.c>trade.entry?'WIN':'LOSS'):(target.c<trade.entry?'WIN':'LOSS'));
         result.pnl=result.result==='WIN'?trade.stake*trade.payout/100:result.result==='LOSS'?-trade.stake:0;result.settledAt=Date.now();result.settlementSource=data.source;
+        await journal.save({id:'operation:'+trade.id,kind:'operation',tradeId:trade.id,parentId:trade.parentId||null,symbol:trade.symbol,interval:trade.interval,market:'OPEN',direction:trade.direction,stake:trade.stake,payout:trade.payout,entry:trade.entry,exit:result.exit,source:trade.source,settlementSource:data.source,status:'SETTLED',result:result.result,pnl:result.pnl,recovery:!!trade.recovery,createdAt:trade.createdAt,settledAt:result.settledAt});
         if(result.result==='LOSS'&&trade.g1Enabled&&!trade.recovery){const required=Math.ceil(((trade.stake+trade.targetExtra)/(trade.payout/100))*100)/100;result.recoveryStake=required<=trade.stake*2?required:null;result.recoveryBlocked=required>trade.stake*2;}}
       else result.lastError='O candle de expiração ainda não foi disponibilizado pela fonte de dados.';
     }catch(e){result.lastError=e.message;}

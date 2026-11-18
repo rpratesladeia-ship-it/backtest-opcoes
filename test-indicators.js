@@ -10,7 +10,7 @@ for(let i=0;i<260;i++){
 }
 const e=ema(close,20),r=rsi(close,14),a=adx(high,low,close,14),m=macd(close),b=bollinger(close,20,2),t=atr(high,low,close,14),d=dmi(high,low,close,14);
 const last=close.length-1;
-for(const [name,value] of Object.entries({EMA:e[last],RSI:r[last],ADX:a[last],MACD:m.line[last],MACD_SIGNAL:m.signal[last],MACD_HIST:m.histogram[last],BB_UPPER:b.upper[last],BB_MIDDLE:b.mid[last],BB_LOWER:b.lower[last],ATR:t[last],DI_PLUS:d.plus[last],DI_MINUS:d.minus[last]}){
+for(const [name,value] of Object.entries({EMA:e[last],RSI:r[last],ADX:a[last],MACD:m.line[last],MACD_SIGNAL:m.signal[last],MACD_HIST:m.histogram[last],BB_UPPER:b.upper[last],BB_MIDDLE:b.mid[last],BB_LOWER:b.lower[last],ATR:t[last],DI_PLUS:d.plus[last],DI_MINUS:d.minus[last]})){
   assert.equal(Number.isFinite(value),true,name+' deve ser finito');
 }
 assert.ok(b.upper[last]>b.mid[last]&&b.mid[last]>b.lower[last],'Bandas Bollinger devem estar ordenadas');

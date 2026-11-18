@@ -49,4 +49,29 @@ function adx(h, l, c, p = 14) {
   return out;
 }
 
-module.exports = { ema, rsi, adx };
+function macd(c, fast=12, slow=26, signalPeriod=9) {
+ const a=ema(c,fast),b=ema(c,slow),line=c.map((_,i)=>a[i]==null||b[i]==null?null:a[i]-b[i]);
+ const first=line.findIndex(v=>v!=null),compact=line.slice(first),sig=ema(compact,signalPeriod),signal=new Array(c.length).fill(null),histogram=new Array(c.length).fill(null);
+ for(let j=0;j<compact.length;j++){const i=first+j;if(sig[j]!=null){signal[i]=sig[j];histogram[i]=line[i]-signal[i];}}
+ return {line,signal,histogram};
+}
+function bollinger(c,p=20,mult=2){
+ const mid=new Array(c.length).fill(null),upper=mid.slice(),lower=mid.slice(),width=mid.slice();
+ for(let i=p-1;i<c.length;i++){const w=c.slice(i-p+1,i+1),avg=w.reduce((a,b)=>a+b,0)/p,sd=Math.sqrt(w.reduce((a,b)=>a+(b-avg)**2,0)/p);mid[i]=avg;upper[i]=avg+mult*sd;lower[i]=avg-mult*sd;width[i]=avg?(upper[i]-lower[i])/avg*100:null;}
+ return {mid,upper,lower,width};
+}
+function atr(h,l,c,p=14){
+ const out=new Array(c.length).fill(null),tr=new Array(c.length).fill(null);if(c.length<=p)return out;
+ for(let i=1;i<c.length;i++)tr[i]=Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1]));
+ let seed=0;for(let i=1;i<=p;i++)seed+=tr[i]||0;out[p]=seed/p;
+ for(let i=p+1;i<c.length;i++)out[i]=(out[i-1]*(p-1)+(tr[i]||0))/p;return out;
+}
+function dmi(h,l,c,p=14){
+ const plus=new Array(c.length).fill(null),minus=new Array(c.length).fill(null);if(c.length<=p)return {plus,minus};
+ let trSum=0,pSum=0,mSum=0;
+ for(let i=1;i<c.length;i++){const up=h[i]-h[i-1],dn=l[i-1]-l[i],pdm=up>dn&&up>0?up:0,mdm=dn>up&&dn>0?dn:0,tr=Math.max(h[i]-l[i],Math.abs(h[i]-c[i-1]),Math.abs(l[i]-c[i-1]));
+ if(i<=p){trSum+=tr;pSum+=pdm;mSum+=mdm;}else{trSum=trSum-trSum/p+tr;pSum=pSum-pSum/p+pdm;mSum=mSum-mSum/p+mdm;}
+ if(i>=p&&trSum>0){plus[i]=100*pSum/trSum;minus[i]=100*mSum/trSum;}}
+ return {plus,minus};
+}
+module.exports = { ema, rsi, adx, macd, bollinger, atr, dmi };

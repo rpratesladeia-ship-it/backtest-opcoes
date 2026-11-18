@@ -116,9 +116,26 @@ async function handle(req,res){
   const data=await klines(symbol,interval,120),last=data.candles[data.candles.length-1];
   if(!last)return json(res,502,{error:'Sem candle fechado para iniciar a simulação.'});
   const ms=intervalMs(interval),targetOpen=last.t+expiry*ms,settleAt=targetOpen+ms;
-  const trade={symbol,direction,interval,expiry,payout,entry:last.c,entryCandleTime:last.t,targetOpen,settleAt,source:data.source,status:'OPEN',createdAt:Date.now(),stake:1};
+  const stake=Math.max(1,Math.min(1000,num(body.stake,5))),g1Enabled=body.g1Enabled===true;
+  const trade={symbol,direction,interval,expiry,payout,entry:last.c,entryCandleTime:last.t,targetOpen,settleAt,source:data.source,status:'OPEN',createdAt:Date.now(),stake,g1Enabled,recovery:false,maxRecoveryMultiplier:2,targetExtra:stake*0.10};
   trade.id=encodeTrade(trade);
   return json(res,200,{...trade,virtual:true,message:'Operação virtual aberta. O identificador assinado permite recuperar a simulação mesmo após reinício do servidor.'});
+ }
+ if(u.pathname==='/api/paper/recovery'&&req.method==='POST'){
+  const body=await readBody(req),parent=decodeTrade(body.id);
+  if(!parent||parent.recovery||!parent.g1Enabled)return json(res,400,{error:'Recuperação G1 não permitida.'});
+  const settled=await klines(parent.symbol,parent.interval,Math.min(200,parent.expiry+5));
+  const target=settled.candles.find(c=>c.t===parent.targetOpen);
+  if(!target)return json(res,409,{error:'O candle da primeira entrada ainda não está disponível.'});
+  const result=target.c===parent.entry?'TIE':(parent.direction==='CALL'?(target.c>parent.entry?'WIN':'LOSS'):(target.c<parent.entry?'WIN':'LOSS'));
+  if(result!=='LOSS')return json(res,409,{error:'A primeira entrada não terminou em LOSS; G1 não será aberta.'});
+  const stake=Math.ceil(((parent.stake+parent.targetExtra)/(parent.payout/100))*100)/100;
+  if(stake>parent.stake*2)return json(res,409,{error:'G1 ultrapassaria o limite de 2x. Ciclo encerrado.',recoveryBlocked:true});
+  const data=await klines(parent.symbol,parent.interval,120),last=data.candles[data.candles.length-1];
+  const ms=intervalMs(parent.interval),targetOpen=last.t+parent.expiry*ms;
+  const trade={symbol:parent.symbol,direction:parent.direction,interval:parent.interval,expiry:parent.expiry,payout:parent.payout,entry:last.c,entryCandleTime:last.t,targetOpen,settleAt:targetOpen+ms,source:data.source,status:'OPEN',createdAt:Date.now(),stake,g1Enabled:false,recovery:true,parentId:parent.id,maxRecoveryMultiplier:2,targetExtra:parent.targetExtra};
+  trade.id=encodeTrade(trade);
+  return json(res,200,{...trade,virtual:true,message:'G1 virtual aberta automaticamente; nenhuma ordem real foi enviada.'});
  }
  if(u.pathname==='/api/paper/status'&&req.method==='GET'){
   const id=u.searchParams.get('id'),trade=decodeTrade(id);
@@ -129,7 +146,8 @@ async function handle(req,res){
       const target=data.candles.find(c=>c.t===trade.targetOpen);
       if(target){result.exit=target.c;result.exitCandleTime=target.t;result.status='SETTLED';
         result.result=target.c===trade.entry?'TIE':(trade.direction==='CALL'?(target.c>trade.entry?'WIN':'LOSS'):(target.c<trade.entry?'WIN':'LOSS'));
-        result.pnl=result.result==='WIN'?trade.stake*trade.payout/100:result.result==='LOSS'?-trade.stake:0;result.settledAt=Date.now();result.settlementSource=data.source;}
+        result.pnl=result.result==='WIN'?trade.stake*trade.payout/100:result.result==='LOSS'?-trade.stake:0;result.settledAt=Date.now();result.settlementSource=data.source;
+        if(result.result==='LOSS'&&trade.g1Enabled&&!trade.recovery){const required=Math.ceil(((trade.stake+trade.targetExtra)/(trade.payout/100))*100)/100;result.recoveryStake=required<=trade.stake*2?required:null;result.recoveryBlocked=required>trade.stake*2;}}
       else result.lastError='O candle de expiração ainda não foi disponibilizado pela fonte de dados.';
     }catch(e){result.lastError=e.message;}
   }

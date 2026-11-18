@@ -142,7 +142,7 @@ async function handle(req,res){
   const data=await klines(symbol,interval,total);
   return json(res,200,{symbol,interval,fonteDados:data.source,...run(data.candles,P)});
  }
- const file=path.join(__dirname,'public','index.html');res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'});fs.createReadStream(file).pipe(res);
+ const file=path.join(__dirname,'public','index.html');res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store, no-cache, must-revalidate, proxy-revalidate','Pragma':'no-cache','Expires':'0'});fs.createReadStream(file).pipe(res);
 }
 const server=http.createServer((req,res)=>{handle(req,res).catch(e=>json(res,502,{error:e.message}));});
 server.listen(PORT,()=>console.log('Backtest Opções scanner 30 ativos / modo virtual na porta '+PORT));

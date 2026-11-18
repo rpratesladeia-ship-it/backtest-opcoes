@@ -93,7 +93,9 @@ async function handle(req,res){
   return json(res,200,{stats,entries});
  }
  if(u.pathname==='/api/scan'&&req.method==='GET'){
-  const q=u.searchParams,interval=['1m','5m'].includes(q.get('interval'))?q.get('interval'):'1m';
+  const q=u.searchParams,market=(q.get('market')||'OPEN').toUpperCase();
+  if(market!=='OPEN')return json(res,409,{error:'OTC bloqueado: feed oficial não conectado; nenhum dado OPEN será usado como substituto.'});
+  const interval=['1m','5m'].includes(q.get('interval'))?q.get('interval'):'1m';
   const total=Math.max(500,Math.min(num(q.get('candles'),1000),10000)),P=params(q);
   const results=new Array(SYMBOLS.length);let cursor=0;
   async function worker(){while(true){const idx=cursor++;if(idx>=SYMBOLS.length)return;const symbol=SYMBOLS[idx];
@@ -119,16 +121,25 @@ async function handle(req,res){
  }
  if(u.pathname==='/api/paper/open'&&req.method==='POST'){
   const body=await readBody(req),symbol=String(body.symbol||'').toUpperCase(),direction=body.direction;
+  if(body.confirmed!==true||body.market!=='OPEN')return json(res,403,{error:'Entrada bloqueada: exige aprovação explícita e mercado OPEN.'});
   const interval=['1m','5m'].includes(body.interval)?body.interval:'1m',expiry=Math.max(1,Math.min(10,num(body.expiry,1))),payout=Math.max(1,Math.min(100,num(body.payout,85)));
   if(!SYMBOLS.includes(symbol)||!['CALL','PUT'].includes(direction))return json(res,400,{error:'Ativo ou direção inválidos.'});
   const data=await klines(symbol,interval,120),last=data.candles[data.candles.length-1];
   if(!last)return json(res,502,{error:'Sem candle fechado para iniciar a simulação.'});
+  const fresh=signalFor(data.candles,{adxMin:20,rsiLow:40,rsiHigh:60});
+  if(!fresh||fresh.direction!==direction||Number(body.signalCandleTime)!==last.t)return json(res,409,{error:'Sinal expirou ou mudou. Entrada cancelada; pesquise novamente.'});
   const ms=intervalMs(interval),targetOpen=last.t+expiry*ms,settleAt=targetOpen+ms;
   const stake=Math.max(1,Math.min(1000,num(body.stake,5))),g1Enabled=body.g1Enabled===true;
   const trade={symbol,direction,interval,expiry,payout,entry:last.c,entryCandleTime:last.t,targetOpen,settleAt,source:data.source,status:'OPEN',createdAt:Date.now(),stake,g1Enabled,recovery:false,maxRecoveryMultiplier:2,targetExtra:stake*0.10};
   trade.id=encodeTrade(trade);
   await journal.save({id:'operation:'+trade.id,kind:'operation',tradeId:trade.id,symbol,interval,market:'OPEN',direction,stake,payout,entry:trade.entry,source:trade.source,status:'OPEN',result:null,recovery:false,createdAt:trade.createdAt});
   return json(res,200,{...trade,virtual:true,message:'Operação virtual aberta. O identificador assinado permite recuperar a simulação mesmo após reinício do servidor.'});
+ }
+ if(u.pathname==='/api/paper/reject'&&req.method==='POST'){
+  const body=await readBody(req),symbol=String(body.symbol||'').toUpperCase(),direction=body.direction;
+  if(!SYMBOLS.includes(symbol)||!['CALL','PUT'].includes(direction))return json(res,400,{error:'Oportunidade inválida.'});
+  await journal.save({id:'rejected:'+crypto.randomUUID(),kind:'rejected',symbol,direction,interval:['1m','5m'].includes(body.interval)?body.interval:'1m',market:'OPEN',reason:'cancelled_by_user',createdAt:Date.now()});
+  return json(res,200,{ok:true,message:'Cancelada e registrada como rejeitada, não como LOSS.'});
  }
  if(u.pathname==='/api/paper/recovery'&&req.method==='POST'){
   const body=await readBody(req),parent=decodeTrade(body.id);

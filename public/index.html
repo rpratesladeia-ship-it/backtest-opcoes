@@ -63,12 +63,20 @@ function renderCandidate(r){
  const x=r.best,s=x.signal,t=x.teste;
  $('summary').innerHTML='<div class="k">OPORTUNIDADE ENCONTRADA</div><div class="big">'+esc(x.symbol)+'</div><div class="big" style="color:var(--gold)">'+(x.direction==='CALL'?'CALL / COMPRA':'PUT / VENDA')+'</div><div class="k">Fonte: '+esc(x.fonteDados)+' · '+esc(r.interval)+' · RSI '+s.rsi+' · ADX '+s.adx+'</div><div class="k">EMA20 '+s.ema20+' · EMA50 '+s.ema50+'</div><div class="k">Backtest independente: '+pct(t.taxaAcerto)+' · '+t.entradas+' resultados · equilíbrio '+pct(t.pontoDeEquilibrio)+'</div><div class="ver warn" style="margin-top:10px">Sinal técnico, não garantia de vitória. Abrindo agora uma operação exclusivamente virtual...</div>';
 
- $('status').textContent='Sinal encontrado em '+x.symbol+'. Preparando entrada virtual automática.';
- startVirtualTrade(x);
+ $('status').textContent='Oportunidade encontrada. Aguardando sua decisão; nenhuma operação foi aberta.';
+ $('summary').insertAdjacentHTML('beforeend','<div class="row"><button id="approveTrade">APROVAR ENTRADA DEMO</button><button id="cancelTrade" class="secondary">CANCELAR</button></div>');
+ $('approveTrade').onclick=()=>startVirtualTrade(x);
+ $('cancelTrade').onclick=()=>rejectCandidate(x);
+}
+async function rejectCandidate(x){
+ try{await fetch('/api/paper/reject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:x.symbol,direction:x.direction,interval:$('interval').value})});
+  $('summary').innerHTML='<div class="ver warn">Oportunidade cancelada. Registrada como rejeitada, não como LOSS.</div><button id="resumeScan" class="secondary">Voltar a pesquisar</button>';
+  $('resumeScan').onclick=()=>{currentCandidate=null;setState(true);scanOnce();};
+ }catch(e){$('status').textContent='Falha ao registrar cancelamento: '+e.message;}
 }
 async function startVirtualTrade(x){
  try{
-  const r=await fetch('/api/paper/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:x.symbol,direction:x.direction,interval:$('interval').value,expiry:$('expiry').value,payout:$('payout').value,stake:$('stake').value,g1Enabled:$('g1Enabled').value==='yes'})}).then(v=>v.json());
+  const r=await fetch('/api/paper/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmed:true,market:'OPEN',signalCandleTime:x.signal.signalCandleTime,symbol:x.symbol,direction:x.direction,interval:$('interval').value,expiry:$('expiry').value,payout:$('payout').value,stake:$('stake').value,g1Enabled:$('g1Enabled').value==='yes'})}).then(v=>v.json());
   if(!r.id)throw new Error(r.error||'Não foi possível abrir a simulação');
   currentTradeId=r.id;
   $('summary').innerHTML='<div class="k">ENTRADA VIRTUAL AUTOMÁTICA</div><div class="big">'+esc(r.symbol)+' '+(r.direction==='CALL'?'CALL / COMPRA':'PUT / VENDA')+'</div><div class="k">Preço de referência: '+fmt(r.entry)+' · Fonte: '+esc(r.source)+'</div><div class="k">Expiração: '+r.expiry+' vela(s) · Valor virtual: R$ '+fmt(r.stake||$('stake').value)</div><div id="tradeStatus" class="ver warn" style="margin-top:10px">Aguardando fechamento do candle de expiração...</div><button id="checkPaper">Verificar resultado</button>';

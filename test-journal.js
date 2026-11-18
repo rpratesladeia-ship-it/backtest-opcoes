@@ -1,0 +1,26 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+(async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'alpha-journal-'));
+ process.env.JOURNAL_DIR=dir;
+ delete process.env.DATABASE_URL;
+ const journal=require('./journal');
+ await journal.save({id:'a1',kind:'analysis',symbol:'BTCUSDT',createdAt:Date.now()});
+ await journal.save({id:'o1',kind:'operation',symbol:'BTCUSDT',result:'WIN',createdAt:Date.now()});
+ await journal.save({id:'o2',kind:'operation',symbol:'BTCUSDT',result:'LOSS',createdAt:Date.now()});
+ await journal.save({id:'o3',kind:'operation',symbol:'ETHUSDT',result:'TIE',createdAt:Date.now()});
+ const stats=await journal.stats();
+ assert.equal(stats.analyses,1);
+ assert.equal(stats.operations,3);
+ assert.equal(stats.wins,1);
+ assert.equal(stats.losses,1);
+ assert.equal(stats.ties,1);
+ assert.equal(stats.byAsset.BTCUSDT.wins,1);
+ assert.equal(stats.byAsset.BTCUSDT.losses,1);
+ assert.equal(stats.byAsset.ETHUSDT.ties,1);
+ assert.equal(stats.byAsset.BTCUSDT.accuracy,50);
+ console.log('Diário OK: totais e ranking por ativo em toda a retenção.');
+ fs.rmSync(dir,{recursive:true,force:true});
+})().catch(e=>{console.error(e);process.exitCode=1;});

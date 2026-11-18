@@ -16,22 +16,23 @@ button:disabled{opacity:.5}.secondary{background:#34343a;color:#fff}.big{font-si
 .robot-wrap svg{width:112px;min-width:112px;height:128px}
 .robot-face{font-size:13px;font-weight:800;letter-spacing:1px}
 .robot-win{color:var(--grn)}.robot-loss{color:var(--red)}.robot-tie{color:var(--gold)}
+.scan-stage{display:flex;align-items:center;justify-content:center;gap:12px;min-height:104px;margin:12px auto;padding:10px;border:1px solid #30303a;border-radius:12px;background:radial-gradient(ellipse at center,#1c2937,#101014 70%);max-width:210px}.ship{width:64px;height:64px;animation:float 1.8s ease-in-out infinite;filter:drop-shadow(0 0 8px #65c9ff)}.scan-dots{font-size:11px;color:#8fcfff;letter-spacing:2px;animation:blink 1s steps(2) infinite}@keyframes float{50%{transform:translateY(-5px) rotate(-3deg)}}@keyframes blink{50%{opacity:.35}}
 </style></head><body>
 <h1>Radar de Oportunidades</h1>
-<p class="s">Escolha M1 ou M5 e mercado aberto. A IA pesquisa 30 ativos, seleciona uma oportunidade e abre uma entrada VIRTUAL automaticamente. Não envia ordens nem movimenta dinheiro.</p>
+<p class="s">Escolha M1 ou M5 e a fonte de dados. O radar procura oportunidades em segundo plano e só mostra o ativo selecionado. Funcionamento exclusivamente DEMO VIRTUAL.</p>
 <div class="card">
 <div class="row">
  <div><label>Timeframe</label><select id="interval"><option value="1m">M1 — 1 minuto</option><option value="5m">M5 — 5 minutos</option></select></div>
- <div><label>Mercado</label><select id="market"><option value="OPEN">Mercado aberto (cripto)</option><option value="OTC">OTC (fonte não conectada)</option></select></div>
+ <div><label>Mercado</label><select id="market"><option value="OTC" selected>OTC — prioridade</option><option value="OPEN">Mercado aberto — Binance / OKX</option></select></div>
 </div>
-<div class="ver warn" id="marketNote">Modo exclusivamente DEMO VIRTUAL. Usa candles públicos da Binance/OKX; não envia ordens à Polarium.</div>
+<div class="ver warn" id="marketNote">OTC selecionado como prioridade. A Polarium informa que a cotação OTC é formada no próprio servidor; ainda não temos acesso autorizado a esse feed. Para não inventar preços, a busca OTC ficará bloqueada até conectar a fonte oficial. Mercado aberto usa candles públicos Binance/OKX.</div>
 <div class="row">
  <div><label>Valor da entrada (R$)</label><input id="stake" type="number" min="1" max="1000" step="0.01" value="5"></div>
  <div><label>Recuperação</label><select id="g1Enabled"><option value="yes">G1 inteligente ativado</option><option value="no">Desativado</option></select></div>
 </div>
 <div class="k">G1: calcula recuperação + 10% da entrada, limitada a 2x. Se ultrapassar o limite, não recupera.</div>
 <button id="start">🔎 Buscar melhor ativo</button><button id="stop" class="secondary" style="display:none">Cancelar pesquisa</button>
-<div class="k" style="margin-top:8px">Analisa até 30 ativos. Se não encontrar oportunidade, continua procurando.</div>
+<div class="k" style="margin-top:8px">A pesquisa roda discretamente. Quando encontrar um sinal válido, o painel apresenta apenas a oportunidade selecionada.</div>
 <input id="expiry" type="hidden" value="1"><input id="payout" type="hidden" value="85"><input id="adxMin" type="hidden" value="20"><input id="candles" type="hidden" value="1000"><input id="rsiLow" type="hidden" value="40"><input id="rsiHigh" type="hidden" value="60">
 </div>
 <div id="out"></div>
@@ -42,17 +43,17 @@ let usedAssets=new Set();
 try{usedAssets=new Set(JSON.parse(localStorage.getItem('radarUsedAssets')||'[]'));}catch{}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function params(){const q=new URLSearchParams();['interval','expiry','payout','adxMin','candles','rsiLow','rsiHigh'].forEach(k=>q.set(k,$(k).value));q.set('exclude',[...usedAssets].join(','));q.set('market',$('market').value);return q;}
-function setState(on){scanning=on;$('start').style.display=on?'none':'block';$('stop').style.display=on?'block':'none';}
+function setState(on){scanning=on;$('start').style.display=on?'none':'block';$('stop').style.display=on?'block':'none';if(on){$('summary').innerHTML='<div class="scan-stage"><svg class="ship" viewBox="0 0 100 100" aria-label="Robô pesquisando"><path d="M50 8 C30 25 24 48 29 68 L50 58 L71 68 C76 48 70 25 50 8Z" fill="#a9d8ed" stroke="#e6f8ff" stroke-width="3"/><circle cx="50" cy="38" r="12" fill="#18374b" stroke="#63caff" stroke-width="3"/><circle cx="46" cy="36" r="2.5" fill="#fff"/><circle cx="54" cy="36" r="2.5" fill="#fff"/><path d="M43 44 Q50 49 57 44" fill="none" stroke="#7de2ff" stroke-width="2"/><path d="M35 66 L25 82 L44 73 M65 66 L75 82 L56 73" fill="#f0b84b"/></svg><div><div class="scan-dots">● ● ●</div><div style="font-size:11px;color:#d5edff">IA pesquisando</div></div></div><div class="k" style="text-align:center">Analisando oportunidades em silêncio...</div>';}}
 async function scanOnce(){
  if(!scanning)return;
- if($('market').value==='OTC'){$('status').textContent='OTC ainda não disponível: falta conectar uma fonte de candles OTC confiável. Selecione Mercado aberto para testar com dados públicos.';setState(false);return;}
+ if($('market').value==='OTC'){$('status').textContent='Pesquisa OTC pausada: a cotação precisa vir do servidor oficial da corretora. Nenhum dado de mercado aberto será usado como substituto.';$('summary').innerHTML='<div class="ver warn">OTC selecionado. A busca será liberada quando conectarmos uma fonte oficial de candles OTC. Mude para Mercado aberto para testar agora.</div>';setState(false);return;}
  scanCount++;
- $('status').textContent='Varredura '+scanCount+': analisando 30 ativos e cruzando os indicadores. A pesquisa continuará automaticamente se não houver sinal.';
+ $('status').textContent='Pesquisa em andamento. O radar está comparando os ativos disponíveis; a lista técnica fica oculta.';
  try{
   const resp=await fetch('/api/scan?'+params()),r=await resp.json();if(!resp.ok)throw new Error(r.error||r.erro||'Falha na pesquisa');
   if(r.best){scanning=false;setState(false);currentCandidate=r.best;usedAssets.add(r.best.symbol);localStorage.setItem('radarUsedAssets',JSON.stringify([...usedAssets]));renderCandidate(r);return;}
-  $('summary').innerHTML='<b>'+r.resultsCount+' de '+r.symbols.length+' ativos consultados</b><div class="k">Nenhum sinal confirmado nesta varredura. Próxima pesquisa automática em 30 segundos.</div>';
-  $('details').innerHTML=renderAssets(r.results);
+  $('summary').innerHTML='<div class="scan-stage"><svg class="ship" viewBox="0 0 100 100"><path d="M50 8 C30 25 24 48 29 68 L50 58 L71 68 C76 48 70 25 50 8Z" fill="#a9d8ed" stroke="#e6f8ff" stroke-width="3"/><circle cx="50" cy="38" r="12" fill="#18374b" stroke="#63caff" stroke-width="3"/><circle cx="46" cy="36" r="2.5" fill="#fff"/><circle cx="54" cy="36" r="2.5" fill="#fff"/></svg><div class="scan-dots">● ● ●</div></div><div class="k" style="text-align:center">Nenhuma oportunidade aprovada ainda. Próxima varredura em 30 segundos.</div>';
+  $('details').innerHTML='';
  }catch(e){$('summary').innerHTML='<div class="ver bad">Falha temporária: '+esc(e.message)+'. O radar tentará novamente.</div>';}
  finally{}
  if(scanning)timer=setTimeout(scanOnce,30000);
@@ -70,7 +71,7 @@ async function startVirtualTrade(x){
   const r=await fetch('/api/paper/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:x.symbol,direction:x.direction,interval:$('interval').value,expiry:$('expiry').value,payout:$('payout').value,stake:$('stake').value,g1Enabled:$('g1Enabled').value==='yes'})}).then(v=>v.json());
   if(!r.id)throw new Error(r.error||'Não foi possível abrir a simulação');
   currentTradeId=r.id;
-  $('summary').innerHTML='<div class="k">ENTRADA VIRTUAL AUTOMÁTICA</div><div class="big">'+esc(r.symbol)+' '+(r.direction==='CALL'?'CALL / COMPRA':'PUT / VENDA')+'</div><div class="k">Preço de referência: '+fmt(r.entry)+' · Fonte: '+esc(r.source)+'</div><div class="k">Expiração: '+r.expiry+' vela(s) · Valor virtual: 1 unidade</div><div id="tradeStatus" class="ver warn" style="margin-top:10px">Aguardando fechamento do candle de expiração...</div><button id="checkPaper">Verificar resultado</button>';
+  $('summary').innerHTML='<div class="k">ENTRADA VIRTUAL AUTOMÁTICA</div><div class="big">'+esc(r.symbol)+' '+(r.direction==='CALL'?'CALL / COMPRA':'PUT / VENDA')+'</div><div class="k">Preço de referência: '+fmt(r.entry)+' · Fonte: '+esc(r.source)+'</div><div class="k">Expiração: '+r.expiry+' vela(s) · Valor virtual: R$ '+fmt(r.stake||$('stake').value)</div><div id="tradeStatus" class="ver warn" style="margin-top:10px">Aguardando fechamento do candle de expiração...</div><button id="checkPaper">Verificar resultado</button>';
   $('checkPaper').onclick=checkPaper;
   $('status').textContent='Entrada virtual iniciada automaticamente. A IA está acompanhando o fechamento.';
   if(tradeCheckTimer)clearInterval(tradeCheckTimer);tradeCheckTimer=setInterval(()=>checkPaper(true),5000);

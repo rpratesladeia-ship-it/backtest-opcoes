@@ -61,14 +61,14 @@ function renderCandidate(r){
 }
 async function confirmStart(){
  const x=currentCandidate;if(!x)return;
- const yes=confirm('CONFIRMAR OPERAÇÃO VIRTUAL?
+ const yes=confirm(`CONFIRMAR OPERAÇÃO VIRTUAL?
 
-Ativo: '+x.symbol+'
-Direção: '+x.direction+'
-Timeframe: '+$('interval').value+'
-Expiração: '+$('expiry').value+' vela(s)
+Ativo: ${x.symbol}
+Direção: ${x.direction}
+Timeframe: ${$('interval').value}
+Expiração: ${$('expiry').value} vela(s)
 
-Nenhuma ordem real será enviada. Deseja gerar a entrada virtual?');
+Nenhuma ordem real será enviada. Deseja gerar a entrada virtual?`);
  if(!yes)return;
  $('confirmStart').disabled=true;$('confirmStart').textContent='Gerando entrada virtual...';
  try{

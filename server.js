@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { run } = require('./backtest');
 const { ema, rsi, adx } = require('./indicators');
+const journal = require('./journal');
 const PORT = process.env.PORT || 3000;
 const SYMBOLS = [
   'BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT','ADAUSDT','DOGEUSDT','TRXUSDT','AVAXUSDT','LINKUSDT',

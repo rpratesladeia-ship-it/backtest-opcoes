@@ -53,7 +53,7 @@ async function scanOnce(){
   const resp=await fetch('/api/scan?'+params()),r=await resp.json();if(!resp.ok)throw new Error(r.error||r.erro||'Falha na pesquisa');
   if(r.best){scanning=false;setState(false);currentCandidate=r.best;usedAssets.add(r.best.symbol);localStorage.setItem('radarUsedAssets',JSON.stringify([...usedAssets]));renderCandidate(r);return;}
   $('summary').innerHTML='<div class="scan-stage"><svg class="ship" viewBox="0 0 100 100"><path d="M50 8 C30 25 24 48 29 68 L50 58 L71 68 C76 48 70 25 50 8Z" fill="#a9d8ed" stroke="#e6f8ff" stroke-width="3"/><circle cx="50" cy="38" r="12" fill="#18374b" stroke="#63caff" stroke-width="3"/><circle cx="46" cy="36" r="2.5" fill="#fff"/><circle cx="54" cy="36" r="2.5" fill="#fff"/></svg><div class="scan-dots">● ● ●</div></div><div class="k" style="text-align:center">Nenhuma oportunidade aprovada ainda. Próxima varredura em 30 segundos.</div>';
-  $('details').innerHTML='';
+
  }catch(e){$('summary').innerHTML='<div class="ver bad">Falha temporária: '+esc(e.message)+'. O radar tentará novamente.</div>';}
  finally{}
  if(scanning)timer=setTimeout(scanOnce,30000);
@@ -62,7 +62,7 @@ function renderAssets(results){let html='';for(const x of results){if(x.erro){ht
 function renderCandidate(r){
  const x=r.best,s=x.signal,t=x.teste;
  $('summary').innerHTML='<div class="k">OPORTUNIDADE ENCONTRADA</div><div class="big">'+esc(x.symbol)+'</div><div class="big" style="color:var(--gold)">'+(x.direction==='CALL'?'CALL / COMPRA':'PUT / VENDA')+'</div><div class="k">Fonte: '+esc(x.fonteDados)+' · '+esc(r.interval)+' · RSI '+s.rsi+' · ADX '+s.adx+'</div><div class="k">EMA20 '+s.ema20+' · EMA50 '+s.ema50+'</div><div class="k">Backtest independente: '+pct(t.taxaAcerto)+' · '+t.entradas+' resultados · equilíbrio '+pct(t.pontoDeEquilibrio)+'</div><div class="ver warn" style="margin-top:10px">Sinal técnico, não garantia de vitória. Abrindo agora uma operação exclusivamente virtual...</div>';
- $('details').innerHTML=renderAssets(r.results);
+
  $('status').textContent='Sinal encontrado em '+x.symbol+'. Preparando entrada virtual automática.';
  startVirtualTrade(x);
 }
@@ -96,7 +96,7 @@ async function checkPaper(){
  }catch(e){b.disabled=false;b.textContent='Verificar resultado';$('tradeStatus').textContent='Erro: '+e.message;}
 }
 document.body.insertAdjacentHTML('beforeend','');
-$('out').innerHTML='<div class="card"><div id="status" class="k">Configure os parâmetros e inicie o radar. Ele continuará pesquisando enquanto esta página permanecer aberta.</div></div><div class="card" id="summary"></div><div class="card"><b>Monitoramento dos ativos</b><div id="details" class="k">Aguardando início.</div></div>';
+$('out').innerHTML='<div class="card"><div id="status" class="k">Configure os parâmetros e inicie o radar. Ele continuará pesquisando enquanto esta página permanecer aberta.</div></div><div class="card" id="summary"></div>';
 $('start').addEventListener('click',()=>{if(scanning)return;scanCount=0;$('status').textContent='BOTÃO ACIONADO. Preparando a primeira varredura dos 30 ativos...';setState(true);scanOnce();});
 $('stop').addEventListener('click',()=>{scanning=false;if(timer)clearTimeout(timer);timer=null;setState(false);$('status').textContent='Pesquisa pausada por você.';});
 window.addEventListener('error',e=>{const st=$('status');if(st)st.textContent='Erro no painel: '+(e.message||'falha de JavaScript');});

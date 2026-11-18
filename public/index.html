@@ -37,8 +37,6 @@ try{usedAssets=new Set(JSON.parse(localStorage.getItem('radarUsedAssets')||'[]')
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function params(){const q=new URLSearchParams();['interval','expiry','payout','adxMin','candles','rsiLow','rsiHigh'].forEach(k=>q.set(k,$(k).value));q.set('exclude',[...usedAssets].join(','));return q;}
 function setState(on){scanning=on;$('start').style.display=on?'none':'block';$('stop').style.display=on?'block':'none';}
-$('start').onclick=()=>{if(scanning)return;scanCount=0;setState(true);scanOnce();};
-$('stop').onclick=()=>{scanning=false;if(timer)clearTimeout(timer);timer=null;setState(false);$('status').textContent='Pesquisa pausada por você.';};
 async function scanOnce(){
  if(!scanning)return;scanCount++;
  $('status').textContent='Varredura '+scanCount+': analisando 30 ativos e cruzando os indicadores. A pesquisa continuará automaticamente se não houver sinal.';
@@ -93,4 +91,8 @@ async function checkPaper(){
 }
 document.body.insertAdjacentHTML('beforeend','');
 $('out').innerHTML='<div class="card"><div id="status" class="k">Configure os parâmetros e inicie o radar. Ele continuará pesquisando enquanto esta página permanecer aberta.</div></div><div class="card" id="summary"></div><div class="card"><b>Monitoramento dos ativos</b><div id="details" class="k">Aguardando início.</div></div>';
+$('start').addEventListener('click',()=>{if(scanning)return;scanCount=0;$('status').textContent='BOTÃO ACIONADO. Preparando a primeira varredura dos 30 ativos...';setState(true);scanOnce();});
+$('stop').addEventListener('click',()=>{scanning=false;if(timer)clearTimeout(timer);timer=null;setState(false);$('status').textContent='Pesquisa pausada por você.';});
+window.addEventListener('error',e=>{const st=$('status');if(st)st.textContent='Erro no painel: '+(e.message||'falha de JavaScript');});
+
 </script></body></html>

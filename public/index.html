@@ -79,9 +79,9 @@ async function startVirtualTrade(x){
   const r=await fetch('/api/paper/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmed:true,market:'OPEN',signalCandleTime:x.signal.signalCandleTime,adxMin:$('adxMin').value,rsiLow:$('rsiLow').value,rsiHigh:$('rsiHigh').value,symbol:x.symbol,direction:x.direction,interval:$('interval').value,expiry:$('expiry').value,payout:$('payout').value,stake:$('stake').value,g1Enabled:$('g1Enabled').value==='yes'})}).then(v=>v.json());
   if(!r.id)throw new Error(r.error||'Não foi possível abrir a simulação');
   currentTradeId=r.id;
-  $('summary').innerHTML='<div class="k">ENTRADA VIRTUAL AUTOMÁTICA</div><div class="big">'+esc(r.symbol)+' '+(r.direction==='CALL'?'CALL / COMPRA':'PUT / VENDA')+'</div><div class="k">Preço de referência: '+fmt(r.entry)+' · Fonte: '+esc(r.source)+'</div><div class="k">Expiração: '+r.expiry+' vela(s) · Valor virtual: R$ '+fmt(r.stake||$('stake').value)</div><div id="tradeStatus" class="ver warn" style="margin-top:10px">Aguardando fechamento do candle de expiração...</div><button id="checkPaper">Verificar resultado</button>';
+  $('summary').innerHTML='<div class="k">ENTRADA VIRTUAL APROVADA POR VOCÊ</div><div class="big">'+esc(r.symbol)+' '+(r.direction==='CALL'?'CALL / COMPRA':'PUT / VENDA')+'</div><div class="k">Preço de referência: '+fmt(r.entry)+' · Fonte: '+esc(r.source)+'</div><div class="k">Expiração: '+r.expiry+' vela(s) · Valor virtual: R$ '+fmt(r.stake||$('stake').value)</div><div id="tradeStatus" class="ver warn" style="margin-top:10px">Aguardando fechamento do candle de expiração...</div><button id="checkPaper">Verificar resultado</button>';
   $('checkPaper').onclick=checkPaper;
-  $('status').textContent='Entrada virtual iniciada automaticamente. A IA está acompanhando o fechamento.';
+  $('status').textContent='Entrada DEMO aprovada por você. A IA está acompanhando o fechamento.';
   if(tradeCheckTimer)clearInterval(tradeCheckTimer);tradeCheckTimer=setInterval(()=>checkPaper(true),5000);
  }catch(e){
   $('summary').insertAdjacentHTML('beforeend','<div class="ver bad">Falha ao abrir entrada virtual: '+esc(e.message)+'</div>');

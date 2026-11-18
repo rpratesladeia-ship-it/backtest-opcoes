@@ -24,7 +24,12 @@ button:disabled{opacity:.5}.secondary{background:#34343a;color:#fff}.big{font-si
  <div><label>Timeframe</label><select id="interval"><option value="1m">M1 — 1 minuto</option><option value="5m">M5 — 5 minutos</option></select></div>
  <div><label>Mercado</label><select id="market"><option value="OPEN">Mercado aberto (cripto)</option><option value="OTC">OTC (fonte não conectada)</option></select></div>
 </div>
-<div class="ver warn" id="marketNote">O radar usa candles públicos de cripto da Binance/OKX. A entrada será exclusivamente VIRTUAL e automática após encontrar sinal.</div>
+<div class="ver warn" id="marketNote">Modo exclusivamente DEMO VIRTUAL. Usa candles públicos da Binance/OKX; não envia ordens à Polarium.</div>
+<div class="row">
+ <div><label>Valor da entrada (R$)</label><input id="stake" type="number" min="1" max="1000" step="0.01" value="5"></div>
+ <div><label>Recuperação</label><select id="g1Enabled"><option value="yes">G1 inteligente ativado</option><option value="no">Desativado</option></select></div>
+</div>
+<div class="k">G1: calcula recuperação + 10% da entrada, limitada a 2x. Se ultrapassar o limite, não recupera.</div>
 <button id="start">🔎 Buscar melhor ativo</button><button id="stop" class="secondary" style="display:none">Cancelar pesquisa</button>
 <div class="k" style="margin-top:8px">Analisa até 30 ativos. Se não encontrar oportunidade, continua procurando.</div>
 <input id="expiry" type="hidden" value="1"><input id="payout" type="hidden" value="85"><input id="adxMin" type="hidden" value="20"><input id="candles" type="hidden" value="1000"><input id="rsiLow" type="hidden" value="40"><input id="rsiHigh" type="hidden" value="60">
@@ -62,7 +67,7 @@ function renderCandidate(r){
 }
 async function startVirtualTrade(x){
  try{
-  const r=await fetch('/api/paper/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:x.symbol,direction:x.direction,interval:$('interval').value,expiry:$('expiry').value,payout:$('payout').value})}).then(v=>v.json());
+  const r=await fetch('/api/paper/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:x.symbol,direction:x.direction,interval:$('interval').value,expiry:$('expiry').value,payout:$('payout').value,stake:$('stake').value,g1Enabled:$('g1Enabled').value==='yes'})}).then(v=>v.json());
   if(!r.id)throw new Error(r.error||'Não foi possível abrir a simulação');
   currentTradeId=r.id;
   $('summary').innerHTML='<div class="k">ENTRADA VIRTUAL AUTOMÁTICA</div><div class="big">'+esc(r.symbol)+' '+(r.direction==='CALL'?'CALL / COMPRA':'PUT / VENDA')+'</div><div class="k">Preço de referência: '+fmt(r.entry)+' · Fonte: '+esc(r.source)+'</div><div class="k">Expiração: '+r.expiry+' vela(s) · Valor virtual: 1 unidade</div><div id="tradeStatus" class="ver warn" style="margin-top:10px">Aguardando fechamento do candle de expiração...</div><button id="checkPaper">Verificar resultado</button>';
@@ -78,7 +83,9 @@ async function startVirtualTrade(x){
 async function checkPaper(){
  const b=$('checkPaper');b.disabled=true;b.textContent='Consultando candle de fechamento...';
  try{const r=await fetch('/api/paper/status?id='+encodeURIComponent(currentTradeId)).then(v=>v.json());if(r.error)throw new Error(r.error);
- if(r.status==='SETTLED'){if(tradeCheckTimer){clearInterval(tradeCheckTimer);tradeCheckTimer=null;}const label=r.result==='WIN'?'VITÓRIA':r.result==='LOSS'?'DERROTA':'EMPATE',cls=r.result==='WIN'?'ok':r.result==='LOSS'?'bad':'warn';
+ if(r.status==='SETTLED'){if(tradeCheckTimer){clearInterval(tradeCheckTimer);tradeCheckTimer=null;}
+ if(r.result==='LOSS'&&r.g1Enabled&&!r.recovery&&r.recoveryStake){$('summary').innerHTML='<div class="ver warn">Primeira entrada LOSS. Abrindo G1 virtual calculada de R$ '+fmt(r.recoveryStake)+'...</div>';try{const g=await fetch('/api/paper/recovery',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:currentTradeId})}).then(v=>v.json());if(!g.id)throw new Error(g.error||'G1 não autorizada');currentTradeId=g.id;$('summary').innerHTML='<div class="k">RECUPERAÇÃO G1 AUTOMÁTICA · VIRTUAL</div><div class="big">'+esc(g.symbol)+' '+(g.direction==='CALL'?'CALL / COMPRA':'PUT / VENDA')+'</div><div class="k">Entrada G1: R$ '+fmt(g.stake)+' · Preço: '+fmt(g.entry)+'</div><div id="tradeStatus" class="ver warn">Aguardando fechamento da vela de recuperação...</div><button id="checkPaper">Verificar resultado</button>';$('checkPaper').onclick=checkPaper;tradeCheckTimer=setInterval(()=>checkPaper(true),5000);return;}catch(e){$('summary').innerHTML='<div class="ver bad">G1 não executada: '+esc(e.message)+'. Ciclo encerrado.</div>';return;}}
+ const label=r.result==='WIN'?'VITÓRIA':r.result==='LOSS'?'DERROTA':'EMPATE',cls=r.result==='WIN'?'ok':r.result==='LOSS'?'bad':'warn';
  const mood=r.result==='WIN'?'win':r.result==='LOSS'?'loss':'tie';
  const eyes=r.result==='LOSS'?'<path d="M82 57 l12 10 m0 -10 l-12 10 M116 57 l12 10 m0 -10 l-12 10" stroke="#ef6268" stroke-width="5" stroke-linecap="round"/>':'<circle cx="88" cy="62" r="6" fill="#d9f5ff"/><circle cx="122" cy="62" r="6" fill="#d9f5ff"/>';
  const mouth=r.result==='WIN'?'<path d="M91 82 Q110 102 129 82" fill="none" stroke="#37c978" stroke-width="6" stroke-linecap="round"/>':r.result==='LOSS'?'<path d="M91 94 Q110 76 129 94" fill="none" stroke="#ef6268" stroke-width="6" stroke-linecap="round"/>':'<path d="M96 88 H124" stroke="#d4af37" stroke-width="6" stroke-linecap="round"/>';

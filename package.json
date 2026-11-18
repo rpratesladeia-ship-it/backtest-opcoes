@@ -4,5 +4,6 @@
   "description": "Backtest honesto de estratégia RSI/ADX/EMA para opções de curto prazo (só análise, sem operar)",
   "main": "server.js",
   "scripts": { "start": "node server.js", "test": "node test.js" },
+  "dependencies": { "pg": "^8.16.3" },
   "engines": { "node": ">=18" }
 }

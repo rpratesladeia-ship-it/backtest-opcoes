@@ -35,7 +35,7 @@ button:disabled{opacity:.5}.secondary{background:#34343a;color:#fff}.big{font-si
 <div class="k" style="margin-top:8px">A pesquisa roda discretamente. Quando encontrar um sinal válido, o painel apresenta apenas a oportunidade selecionada.</div>
 <input id="expiry" type="hidden" value="1"><input id="payout" type="hidden" value="85"><input id="adxMin" type="hidden" value="20"><input id="candles" type="hidden" value="1000"><input id="rsiLow" type="hidden" value="40"><input id="rsiHigh" type="hidden" value="60">
 </div>
-<div id="out"></div>
+<button id="journalBtn" class="secondary">📚 Diário de operações (90 dias)</button><div id="journalPanel" class="card" style="display:none"></div><div id="out"></div>
 <script>
 const $=id=>document.getElementById(id),pct=x=>(x*100).toFixed(1)+'%',fmt=x=>Number(x).toLocaleString('pt-BR',{maximumFractionDigits:8});
 let scanning=false,timer=null,currentCandidate=null,currentTradeId=null,scanCount=0,resultTimer=null,tradeCheckTimer=null;
@@ -95,7 +95,16 @@ async function checkPaper(){
  else{$('tradeStatus').textContent='Ainda aguardando o candle de expiração. Tempo estimado: '+Math.ceil((r.remainingMs||0)/1000)+' segundo(s). '+(r.lastError||'');b.disabled=false;b.textContent='Verificar resultado';}
  }catch(e){b.disabled=false;b.textContent='Verificar resultado';$('tradeStatus').textContent='Erro: '+e.message;}
 }
-document.body.insertAdjacentHTML('beforeend','');
+async function loadJournal(){
+ const panel=$('journalPanel');panel.style.display='block';panel.innerHTML='<div class="k">Carregando diário...</div>';
+ try{
+  const r=await fetch('/api/journal?limit=30').then(v=>v.json()),s=r.stats||{};
+  const rows=(r.entries||[]).filter(x=>x.kind==='operation').slice(0,12);
+  panel.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center"><b>Diário inteligente</b><button id="closeJournal" class="secondary" style="width:auto;margin:0;padding:7px 10px">Fechar</button></div><div class="row" style="margin-top:12px"><div><div class="k">Análises salvas</div><b>'+s.analyses+'</b></div><div><div class="k">Operações encerradas</div><b>'+s.operations+'</b></div><div><div class="k">GREEN / LOSS</div><b>'+s.wins+' / '+s.losses+'</b></div><div><div class="k">Assertividade</div><b>'+(s.accuracy===null?'—':s.accuracy+'%')+'</b></div></div><div class="k" style="margin:10px 0">Retenção: 90 dias · Armazenamento: '+(s.storage==='postgresql'?'PostgreSQL':'local temporário')+'</div><hr style="border-color:#333"><b>Operações recentes</b>'+(rows.length?rows.map(x=>'<div class="asset"><div><b>'+esc(x.symbol)+'</b><div class="k">'+esc(x.direction)+' · '+(x.recovery?'G1':'Normal')+' · '+new Date(x.createdAt).toLocaleString('pt-BR')+'</div></div><div class="tag">'+(x.result||'ABERTA')+'</div></div>').join(''):'<div class="k" style="margin-top:8px">Ainda não há operações registradas.</div>');
+  $('closeJournal').onclick=()=>panel.style.display='none';
+ }catch(e){panel.innerHTML='<div class="ver bad">Não foi possível carregar o diário: '+esc(e.message)+'</div>';}
+}
+$('journalBtn').addEventListener('click',loadJournal);
 $('out').innerHTML='<div class="card"><div id="status" class="k">Configure os parâmetros e inicie o radar. Ele continuará pesquisando enquanto esta página permanecer aberta.</div></div><div class="card" id="summary"></div>';
 $('start').addEventListener('click',()=>{if(scanning)return;scanCount=0;$('status').textContent='BOTÃO ACIONADO. Preparando a primeira varredura dos 30 ativos...';setState(true);scanOnce();});
 $('stop').addEventListener('click',()=>{scanning=false;if(timer)clearTimeout(timer);timer=null;setState(false);$('status').textContent='Pesquisa pausada por você.';});

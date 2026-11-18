@@ -117,8 +117,10 @@ async function handle(req,res){
   await Promise.all(results.map(x=>journal.save({id:'analysis:'+scanId+':'+x.symbol,kind:'analysis',scanId,createdAt:analyzedAt,symbol:x.symbol,interval,market:'OPEN',source:x.fonteDados||null,candles:x.candles||0,signal:x.signal||null,backtest:x.teste||null,error:x.erro||null})));
   const valid=results.filter(x=>!x.erro&&x.teste);
   const excluded=new Set((q.get('exclude')||'').split(',').map(x=>x.trim().toUpperCase()).filter(Boolean));
-  const candidates=valid.filter(x=>x.signal&&x.teste.entradas>=5&&!excluded.has(x.symbol));
+  const candidates=valid.filter(x=>x.signal&&x.teste.entradas>=100&&x.teste.intervalo95&&x.teste.intervalo95[0]>x.teste.pontoDeEquilibrio&&!excluded.has(x.symbol));
   candidates.sort((a,b)=>{
+    const score=(b.signal.technicalScore||0)-(a.signal.technicalScore||0);
+    if(score!==0)return score;
     const edge=(b.teste.esperancaPorEntrada||0)-(a.teste.esperancaPorEntrada||0);
     if(Math.abs(edge)>0.000001)return edge;
     return b.signal.signalCandleTime-a.signal.signalCandleTime;

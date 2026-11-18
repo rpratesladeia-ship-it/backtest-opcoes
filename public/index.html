@@ -31,7 +31,9 @@ button:disabled{opacity:.5}.secondary{background:#34343a;color:#fff}.big{font-si
 <div id="out"></div>
 <script>
 const $=id=>document.getElementById(id),pct=x=>(x*100).toFixed(1)+'%',fmt=x=>Number(x).toLocaleString('pt-BR',{maximumFractionDigits:8});
-let scanning=false,timer=null,currentCandidate=null,currentTradeId=null,scanCount=0,resultTimer=null,tradeCheckTimer=null;\nlet usedAssets=new Set();\ntry{usedAssets=new Set(JSON.parse(localStorage.getItem('radarUsedAssets')||'[]'));}catch{}
+let scanning=false,timer=null,currentCandidate=null,currentTradeId=null,scanCount=0,resultTimer=null,tradeCheckTimer=null;
+let usedAssets=new Set();
+try{usedAssets=new Set(JSON.parse(localStorage.getItem('radarUsedAssets')||'[]'));}catch{}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function params(){const q=new URLSearchParams();['interval','expiry','payout','adxMin','candles','rsiLow','rsiHigh'].forEach(k=>q.set(k,$(k).value));q.set('exclude',[...usedAssets].join(','));return q;}
 function setState(on){scanning=on;$('start').style.display=on?'none':'block';$('stop').style.display=on?'block':'none';}
@@ -59,14 +61,22 @@ function renderCandidate(r){
 }
 async function confirmStart(){
  const x=currentCandidate;if(!x)return;
- const yes=confirm('CONFIRMAR OPERAÇÃO VIRTUAL?\n\nAtivo: '+x.symbol+'\nDireção: '+x.direction+'\nTimeframe: '+$('interval').value+'\nExpiração: '+$('expiry').value+' vela(s)\n\nNenhuma ordem real será enviada. Deseja gerar a entrada virtual?');
+ const yes=confirm('CONFIRMAR OPERAÇÃO VIRTUAL?
+
+Ativo: '+x.symbol+'
+Direção: '+x.direction+'
+Timeframe: '+$('interval').value+'
+Expiração: '+$('expiry').value+' vela(s)
+
+Nenhuma ordem real será enviada. Deseja gerar a entrada virtual?');
  if(!yes)return;
  $('confirmStart').disabled=true;$('confirmStart').textContent='Gerando entrada virtual...';
  try{
   const r=await fetch('/api/paper/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:x.symbol,direction:x.direction,interval:$('interval').value,expiry:$('expiry').value,payout:$('payout').value})}).then(v=>v.json());
   if(!r.id)throw new Error(r.error||'Não foi possível abrir a simulação');
   currentTradeId=r.id;$('summary').innerHTML='<div class="k">ENTRADA VIRTUAL GERADA APÓS SUA CONFIRMAÇÃO</div><div class="big">'+esc(r.symbol)+' '+esc(r.direction)+'</div><div class="k">Preço de referência: '+fmt(r.entry)+' · Fonte: '+esc(r.source)+'</div><div class="k">Expiração: '+r.expiry+' vela(s) · Valor virtual: 1 unidade</div><div id="tradeStatus" class="ver warn" style="margin-top:10px">Aguardando o fechamento do candle de expiração.</div><button id="checkPaper">Verificar resultado</button>';
-  $('checkPaper').onclick=checkPaper;$('status').textContent='Entrada virtual aberta. O resultado será consultado automaticamente após a expiração.';\n  if(tradeCheckTimer)clearInterval(tradeCheckTimer);tradeCheckTimer=setInterval(()=>checkPaper(true),5000);
+  $('checkPaper').onclick=checkPaper;$('status').textContent='Entrada virtual aberta. O resultado será consultado automaticamente após a expiração.';
+  if(tradeCheckTimer)clearInterval(tradeCheckTimer);tradeCheckTimer=setInterval(()=>checkPaper(true),5000);
  }catch(e){$('summary').insertAdjacentHTML('beforeend','<div class="ver bad">'+esc(e.message)+'</div><button id="resume" class="secondary">Voltar a pesquisar</button>');$('resume').onclick=()=>{setState(true);scanOnce();};}
 }
 async function checkPaper(){

@@ -18,16 +18,17 @@ button:disabled{opacity:.5}.secondary{background:#34343a;color:#fff}.big{font-si
 .robot-win{color:var(--grn)}.robot-loss{color:var(--red)}.robot-tie{color:var(--gold)}
 </style></head><body>
 <h1>Radar de Oportunidades</h1>
-<p class="s">Monitora continuamente 30 pares cripto usando candles públicos da Binance e fallback OKX. Quando encontrar um sinal técnico, pausa e pede sua confirmação. Todas as entradas são VIRTUAIS: não envia ordens nem movimenta dinheiro.</p>
+<p class="s">Escolha M1 ou M5 e mercado aberto. A IA pesquisa 30 ativos, seleciona uma oportunidade e abre uma entrada VIRTUAL automaticamente. Não envia ordens nem movimenta dinheiro.</p>
 <div class="card">
-<div class="row"><div><label>Timeframe</label><select id="interval"><option value="1m">M1</option><option value="5m">M5</option></select></div>
-<div><label>Expiração (velas)</label><input id="expiry" type="number" value="1" min="1" max="10"></div></div>
-<div class="row"><div><label>Payout estimado (%)</label><input id="payout" type="number" value="85"></div>
-<div><label>ADX mínimo</label><input id="adxMin" type="number" value="20"></div></div>
-<div class="row"><div><label>Candles por ativo</label><input id="candles" type="number" value="1000" min="500" max="10000"></div>
-<div><label>RSI compra (≤)</label><input id="rsiLow" type="number" value="40"></div></div>
-<label>RSI venda (≥)</label><input id="rsiHigh" type="number" value="60">
-<button id="start">Iniciar pesquisa contínua</button><button id="stop" class="secondary" style="display:none">Parar pesquisa</button></div>
+<div class="row">
+ <div><label>Timeframe</label><select id="interval"><option value="1m">M1 — 1 minuto</option><option value="5m">M5 — 5 minutos</option></select></div>
+ <div><label>Mercado</label><select id="market"><option value="OPEN">Mercado aberto (cripto)</option><option value="OTC">OTC (fonte não conectada)</option></select></div>
+</div>
+<div class="ver warn" id="marketNote">O radar usa candles públicos de cripto da Binance/OKX. A entrada será exclusivamente VIRTUAL e automática após encontrar sinal.</div>
+<button id="start">🔎 Buscar melhor ativo</button><button id="stop" class="secondary" style="display:none">Cancelar pesquisa</button>
+<div class="k" style="margin-top:8px">Analisa até 30 ativos. Se não encontrar oportunidade, continua procurando.</div>
+<input id="expiry" type="hidden" value="1"><input id="payout" type="hidden" value="85"><input id="adxMin" type="hidden" value="20"><input id="candles" type="hidden" value="1000"><input id="rsiLow" type="hidden" value="40"><input id="rsiHigh" type="hidden" value="60">
+</div>
 <div id="out"></div>
 <script>
 const $=id=>document.getElementById(id),pct=x=>(x*100).toFixed(1)+'%',fmt=x=>Number(x).toLocaleString('pt-BR',{maximumFractionDigits:8});
@@ -35,10 +36,12 @@ let scanning=false,timer=null,currentCandidate=null,currentTradeId=null,scanCoun
 let usedAssets=new Set();
 try{usedAssets=new Set(JSON.parse(localStorage.getItem('radarUsedAssets')||'[]'));}catch{}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function params(){const q=new URLSearchParams();['interval','expiry','payout','adxMin','candles','rsiLow','rsiHigh'].forEach(k=>q.set(k,$(k).value));q.set('exclude',[...usedAssets].join(','));return q;}
+function params(){const q=new URLSearchParams();['interval','expiry','payout','adxMin','candles','rsiLow','rsiHigh'].forEach(k=>q.set(k,$(k).value));q.set('exclude',[...usedAssets].join(','));q.set('market',$('market').value);return q;}
 function setState(on){scanning=on;$('start').style.display=on?'none':'block';$('stop').style.display=on?'block':'none';}
 async function scanOnce(){
- if(!scanning)return;scanCount++;
+ if(!scanning)return;
+ if($('market').value==='OTC'){$('status').textContent='OTC ainda não disponível: falta conectar uma fonte de candles OTC confiável. Selecione Mercado aberto para testar com dados públicos.';setState(false);return;}
+ scanCount++;
  $('status').textContent='Varredura '+scanCount+': analisando 30 ativos e cruzando os indicadores. A pesquisa continuará automaticamente se não houver sinal.';
  try{
   const resp=await fetch('/api/scan?'+params()),r=await resp.json();if(!resp.ok)throw new Error(r.error||r.erro||'Falha na pesquisa');
@@ -52,30 +55,25 @@ async function scanOnce(){
 function renderAssets(results){let html='';for(const x of results){if(x.erro){html+='<div class="asset"><b>'+esc(x.symbol)+'</b><span class="muted">dados indisponíveis</span></div>';continue;}const sig=x.signal;html+='<div class="asset"><div><b>'+esc(x.symbol)+'</b><div class="k">'+(sig?sig.direction+' · RSI '+sig.rsi+' · ADX '+sig.adx:'Sem sinal neste momento')+'</div></div><div class="tag">'+(sig?'sinal':'monitorando')+'</div></div>';}return html;}
 function renderCandidate(r){
  const x=r.best,s=x.signal,t=x.teste;
- $('summary').innerHTML='<div class="k">OPORTUNIDADE ENCONTRADA — RADAR PAUSADO</div><div class="big">'+esc(x.symbol)+'</div><div class="big" style="color:var(--gold)">'+(x.direction==='CALL'?'CALL / COMPRA':'PUT / VENDA')+'</div><div class="k">Fonte: '+esc(x.fonteDados)+' · '+esc(r.interval)+' · RSI '+s.rsi+' · ADX '+s.adx+'</div><div class="k">EMA20 '+s.ema20+' · EMA50 '+s.ema50+'</div><div class="k">Backtest independente: '+pct(t.taxaAcerto)+' · '+t.entradas+' resultados · equilíbrio '+pct(t.pontoDeEquilibrio)+'</div><div class="ver warn" style="margin-top:10px">Sinal técnico, não garantia de vitória. Confira o ativo e confirme se deseja iniciar a operação virtual.</div><button id="confirmStart">INICIAR ATIVO</button><button id="resume" class="secondary">Não iniciar — continuar pesquisando</button>';
+ $('summary').innerHTML='<div class="k">OPORTUNIDADE ENCONTRADA</div><div class="big">'+esc(x.symbol)+'</div><div class="big" style="color:var(--gold)">'+(x.direction==='CALL'?'CALL / COMPRA':'PUT / VENDA')+'</div><div class="k">Fonte: '+esc(x.fonteDados)+' · '+esc(r.interval)+' · RSI '+s.rsi+' · ADX '+s.adx+'</div><div class="k">EMA20 '+s.ema20+' · EMA50 '+s.ema50+'</div><div class="k">Backtest independente: '+pct(t.taxaAcerto)+' · '+t.entradas+' resultados · equilíbrio '+pct(t.pontoDeEquilibrio)+'</div><div class="ver warn" style="margin-top:10px">Sinal técnico, não garantia de vitória. Abrindo agora uma operação exclusivamente virtual...</div>';
  $('details').innerHTML=renderAssets(r.results);
- $('confirmStart').onclick=confirmStart;$('resume').onclick=()=>{currentCandidate=null;setState(true);scanOnce();};
- $('status').textContent='Foi encontrado um candidato. O radar está pausado aguardando sua decisão.';
+ $('status').textContent='Sinal encontrado em '+x.symbol+'. Preparando entrada virtual automática.';
+ startVirtualTrade(x);
 }
-async function confirmStart(){
- const x=currentCandidate;if(!x)return;
- const yes=confirm(`CONFIRMAR OPERAÇÃO VIRTUAL?
-
-Ativo: ${x.symbol}
-Direção: ${x.direction}
-Timeframe: ${$('interval').value}
-Expiração: ${$('expiry').value} vela(s)
-
-Nenhuma ordem real será enviada. Deseja gerar a entrada virtual?`);
- if(!yes)return;
- $('confirmStart').disabled=true;$('confirmStart').textContent='Gerando entrada virtual...';
+async function startVirtualTrade(x){
  try{
   const r=await fetch('/api/paper/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:x.symbol,direction:x.direction,interval:$('interval').value,expiry:$('expiry').value,payout:$('payout').value})}).then(v=>v.json());
   if(!r.id)throw new Error(r.error||'Não foi possível abrir a simulação');
-  currentTradeId=r.id;$('summary').innerHTML='<div class="k">ENTRADA VIRTUAL GERADA APÓS SUA CONFIRMAÇÃO</div><div class="big">'+esc(r.symbol)+' '+esc(r.direction)+'</div><div class="k">Preço de referência: '+fmt(r.entry)+' · Fonte: '+esc(r.source)+'</div><div class="k">Expiração: '+r.expiry+' vela(s) · Valor virtual: 1 unidade</div><div id="tradeStatus" class="ver warn" style="margin-top:10px">Aguardando o fechamento do candle de expiração.</div><button id="checkPaper">Verificar resultado</button>';
-  $('checkPaper').onclick=checkPaper;$('status').textContent='Entrada virtual aberta. O resultado será consultado automaticamente após a expiração.';
+  currentTradeId=r.id;
+  $('summary').innerHTML='<div class="k">ENTRADA VIRTUAL AUTOMÁTICA</div><div class="big">'+esc(r.symbol)+' '+(r.direction==='CALL'?'CALL / COMPRA':'PUT / VENDA')+'</div><div class="k">Preço de referência: '+fmt(r.entry)+' · Fonte: '+esc(r.source)+'</div><div class="k">Expiração: '+r.expiry+' vela(s) · Valor virtual: 1 unidade</div><div id="tradeStatus" class="ver warn" style="margin-top:10px">Aguardando fechamento do candle de expiração...</div><button id="checkPaper">Verificar resultado</button>';
+  $('checkPaper').onclick=checkPaper;
+  $('status').textContent='Entrada virtual iniciada automaticamente. A IA está acompanhando o fechamento.';
   if(tradeCheckTimer)clearInterval(tradeCheckTimer);tradeCheckTimer=setInterval(()=>checkPaper(true),5000);
- }catch(e){$('summary').insertAdjacentHTML('beforeend','<div class="ver bad">'+esc(e.message)+'</div><button id="resume" class="secondary">Voltar a pesquisar</button>');$('resume').onclick=()=>{setState(true);scanOnce();};}
+ }catch(e){
+  $('summary').insertAdjacentHTML('beforeend','<div class="ver bad">Falha ao abrir entrada virtual: '+esc(e.message)+'</div>');
+  $('status').textContent='Não foi possível iniciar a simulação. O radar será retomado.';
+  if(scanning)timer=setTimeout(scanOnce,10000);
+ }
 }
 async function checkPaper(){
  const b=$('checkPaper');b.disabled=true;b.textContent='Consultando candle de fechamento...';

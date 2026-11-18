@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { run } = require('./backtest');
-const { ema, rsi, adx } = require('./indicators');
+const { ema, rsi, adx, macd, bollinger, atr, dmi } = require('./indicators');
 const journal = require('./journal');
 const PORT = process.env.PORT || 3000;
 const SYMBOLS = [
@@ -73,15 +73,24 @@ async function klines(symbol,interval,total){
 const num=(v,d)=>v!==null&&v!==''&&Number.isFinite(+v)?+v:d;
 function params(q){return{expiry:Math.max(1,Math.min(10,num(q.get('expiry'),1))),payout:Math.max(1,Math.min(100,num(q.get('payout'),85))),adxMin:num(q.get('adxMin'),20),rsiLow:num(q.get('rsiLow'),40),rsiHigh:num(q.get('rsiHigh'),60)};}
 function signalFor(candles,P){
-  if(candles.length<80)return null;
-  const c=candles.map(x=>x.c),h=candles.map(x=>x.h),l=candles.map(x=>x.l);
-  const i=c.length-1,ef=ema(c,20),es=ema(c,50),R=rsi(c,14),A=adx(h,l,c,14);
-  if(ef[i]==null||es[i]==null||R[i]==null||A[i]==null)return null;
-  let direction=null;
-  if(ef[i]>es[i]&&A[i]>=P.adxMin&&R[i]<=P.rsiLow)direction='CALL';
-  else if(ef[i]<es[i]&&A[i]>=P.adxMin&&R[i]>=P.rsiHigh)direction='PUT';
-  if(!direction)return null;
-  return {direction,rsi:+R[i].toFixed(2),adx:+A[i].toFixed(2),ema20:+ef[i].toFixed(8),ema50:+es[i].toFixed(8),signalCandleTime:candles[i].t};
+ if(candles.length<80)return null;
+ const c=candles.map(x=>x.c),h=candles.map(x=>x.h),l=candles.map(x=>x.l),o=candles.map(x=>x.o);
+ const i=c.length-1,ef=ema(c,20),es=ema(c,50),R=rsi(c,14),A=adx(h,l,c,14),D=dmi(h,l,c,14),M=macd(c),B=bollinger(c,20,2),T=atr(h,l,c,14);
+ if([ef[i],es[i],R[i],A[i],D.plus[i],D.minus[i],M.line[i],M.signal[i],B.upper[i],B.lower[i],T[i]].some(v=>v==null))return null;
+ const direction=ef[i]>es[i]?'CALL':ef[i]<es[i]?'PUT':null;if(!direction||A[i]<P.adxMin)return null;
+ const range=Math.max(h[i]-l[i],1e-12),body=Math.abs(c[i]-o[i])/range,candleDir=c[i]>o[i]?'CALL':c[i]<o[i]?'PUT':null;
+ const dmiDir=D.plus[i]>D.minus[i]?'CALL':D.minus[i]>D.plus[i]?'PUT':null,macdDir=M.histogram[i]>0?'CALL':M.histogram[i]<0?'PUT':null;
+ const rsiDir=direction==='CALL'?(R[i]>=50&&R[i]<=P.rsiHigh?'CALL':null):(R[i]<=50&&R[i]>=P.rsiLow?'PUT':null);
+ const agreement=[direction,dmiDir,macdDir,rsiDir,candleDir].filter(x=>x===direction).length,score=agreement*20;if(agreement<4)return null;
+ const recentH=Math.max(...h.slice(Math.max(0,i-20),i)),recentL=Math.min(...l.slice(Math.max(0,i-20),i));
+ const resistanceGap=(recentH-c[i])/T[i],supportGap=(c[i]-recentL)/T[i];
+ if((direction==='CALL'&&resistanceGap>=0&&resistanceGap<0.25)||(direction==='PUT'&&supportGap>=0&&supportGap<0.25))return null;
+ return {direction,technicalScore:score,scoreLabel:'confluência técnica (não é probabilidade)',agreement,
+ rsi:+R[i].toFixed(2),adx:+A[i].toFixed(2),diPlus:+D.plus[i].toFixed(2),diMinus:+D.minus[i].toFixed(2),
+ ema20:+ef[i].toFixed(8),ema50:+es[i].toFixed(8),macd:+M.line[i].toFixed(8),macdSignal:+M.signal[i].toFixed(8),macdHistogram:+M.histogram[i].toFixed(8),
+ bollingerUpper:+B.upper[i].toFixed(8),bollingerMiddle:+B.mid[i].toFixed(8),bollingerLower:+B.lower[i].toFixed(8),
+ atr:+T[i].toFixed(8),volatilityPct:+(T[i]/c[i]*100).toFixed(4),candleBodyPct:+(body*100).toFixed(1),
+ support:+recentL.toFixed(8),resistance:+recentH.toFixed(8),signalCandleTime:candles[i].t};
 }
 function json(res,code,obj){res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(obj));}
 function readBody(req){return new Promise((resolve,reject)=>{let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{try{resolve(JSON.parse(raw||'{}'));}catch(e){reject(e);}});req.on('error',reject);});}
@@ -126,7 +135,7 @@ async function handle(req,res){
   if(!SYMBOLS.includes(symbol)||!['CALL','PUT'].includes(direction))return json(res,400,{error:'Ativo ou direção inválidos.'});
   const data=await klines(symbol,interval,120),last=data.candles[data.candles.length-1];
   if(!last)return json(res,502,{error:'Sem candle fechado para iniciar a simulação.'});
-  const fresh=signalFor(data.candles,{adxMin:20,rsiLow:40,rsiHigh:60});
+  const fresh=signalFor(data.candles,{adxMin:num(body.adxMin,20),rsiLow:num(body.rsiLow,40),rsiHigh:num(body.rsiHigh,60)});
   if(!fresh||fresh.direction!==direction||Number(body.signalCandleTime)!==last.t)return json(res,409,{error:'Sinal expirou ou mudou. Entrada cancelada; pesquise novamente.'});
   const ms=intervalMs(interval),targetOpen=last.t+expiry*ms,settleAt=targetOpen+ms;
   const stake=Math.max(1,Math.min(1000,num(body.stake,5))),g1Enabled=body.g1Enabled===true;

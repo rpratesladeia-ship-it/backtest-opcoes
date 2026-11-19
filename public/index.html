@@ -23,7 +23,7 @@ button:disabled{opacity:.5}.secondary{background:#34343a;color:#fff}.big{font-si
 <div class="card">
 <div class="row">
  <div><label>Timeframe</label><select id="interval"><option value="1m">M1 — 1 minuto</option><option value="5m">M5 — 5 minutos</option></select></div>
- <div><label>Mercado</label><select id="market"><option value="OTC" selected>OTC — prioridade</option><option value="OPEN">Mercado aberto — Binance / OKX</option></select></div>
+ <div><label>Mercado</label><select id="market"><option value="OPEN" selected>Mercado aberto — Binance / OKX</option><option value="OTC">OTC — Polarium (bloqueado sem feed)</option></select></div>
 </div>
 <div class="ver warn" id="marketNote">OTC selecionado como prioridade. A Polarium informa que a cotação OTC é formada no próprio servidor; ainda não temos acesso autorizado a esse feed. Para não inventar preços, a busca OTC ficará bloqueada até conectar a fonte oficial. Mercado aberto usa candles públicos Binance/OKX.</div>
 <div class="row">
@@ -40,7 +40,6 @@ button:disabled{opacity:.5}.secondary{background:#34343a;color:#fff}.big{font-si
 const $=id=>document.getElementById(id),pct=x=>(x*100).toFixed(1)+'%',fmt=x=>Number(x).toLocaleString('pt-BR',{maximumFractionDigits:8});
 let scanning=false,timer=null,currentCandidate=null,currentTradeId=null,scanCount=0,resultTimer=null,tradeCheckTimer=null;
 let usedAssets=new Set();
-try{usedAssets=new Set(JSON.parse(localStorage.getItem('radarUsedAssets')||'[]'));}catch{}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function params(){const q=new URLSearchParams();['interval','expiry','payout','adxMin','candles','rsiLow','rsiHigh'].forEach(k=>q.set(k,$(k).value));q.set('exclude',[...usedAssets].join(','));q.set('market',$('market').value);return q;}
 function setState(on){scanning=on;$('start').style.display=on?'none':'block';$('stop').style.display=on?'block':'none';if(on){$('summary').innerHTML='<div class="scan-stage"><svg class="ship" viewBox="0 0 100 100" aria-label="Robô pesquisando"><path d="M50 8 C30 25 24 48 29 68 L50 58 L71 68 C76 48 70 25 50 8Z" fill="#a9d8ed" stroke="#e6f8ff" stroke-width="3"/><circle cx="50" cy="38" r="12" fill="#18374b" stroke="#63caff" stroke-width="3"/><circle cx="46" cy="36" r="2.5" fill="#fff"/><circle cx="54" cy="36" r="2.5" fill="#fff"/><path d="M43 44 Q50 49 57 44" fill="none" stroke="#7de2ff" stroke-width="2"/><path d="M35 66 L25 82 L44 73 M65 66 L75 82 L56 73" fill="#f0b84b"/></svg><div><div class="scan-dots">● ● ●</div><div style="font-size:11px;color:#d5edff">IA pesquisando</div></div></div><div class="k" style="text-align:center">Analisando oportunidades em silêncio...</div>';}}
@@ -51,7 +50,7 @@ async function scanOnce(){
  $('status').textContent='Pesquisa em andamento. O radar está comparando os ativos disponíveis; a lista técnica fica oculta.';
  try{
   const resp=await fetch('/api/scan?'+params()),r=await resp.json();if(!resp.ok)throw new Error(r.error||r.erro||'Falha na pesquisa');
-  if(r.best){scanning=false;setState(false);currentCandidate=r.best;usedAssets.add(r.best.symbol);localStorage.setItem('radarUsedAssets',JSON.stringify([...usedAssets]));renderCandidate(r);return;}
+  if(r.best){scanning=false;setState(false);currentCandidate=r.best;usedAssets.add(r.best.symbol);renderCandidate(r);return;}
   $('summary').innerHTML='<div class="scan-stage"><svg class="ship" viewBox="0 0 100 100"><path d="M50 8 C30 25 24 48 29 68 L50 58 L71 68 C76 48 70 25 50 8Z" fill="#a9d8ed" stroke="#e6f8ff" stroke-width="3"/><circle cx="50" cy="38" r="12" fill="#18374b" stroke="#63caff" stroke-width="3"/><circle cx="46" cy="36" r="2.5" fill="#fff"/><circle cx="54" cy="36" r="2.5" fill="#fff"/></svg><div class="scan-dots">● ● ●</div></div><div class="k" style="text-align:center">Nenhuma oportunidade aprovada ainda. Próxima varredura em 30 segundos.</div>';
 
  }catch(e){$('summary').innerHTML='<div class="ver bad">Falha temporária: '+esc(e.message)+'. O radar tentará novamente.</div>';}
@@ -69,7 +68,7 @@ function renderCandidate(r){
  $('cancelTrade').onclick=()=>rejectCandidate(x);
 }
 async function rejectCandidate(x){
- try{await fetch('/api/paper/reject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:x.symbol,direction:x.direction,interval:$('interval').value})});
+ try{const response=await fetch('/api/paper/reject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:x.symbol,direction:x.direction,interval:$('interval').value})});if(!response.ok)throw new Error('Servidor não confirmou o cancelamento');
   $('summary').innerHTML='<div class="ver warn">Oportunidade cancelada. Registrada como rejeitada, não como LOSS.</div><button id="resumeScan" class="secondary">Voltar a pesquisar</button>';
   $('resumeScan').onclick=()=>{currentCandidate=null;setState(true);scanOnce();};
  }catch(e){$('status').textContent='Falha ao registrar cancelamento: '+e.message;}
@@ -93,7 +92,7 @@ async function checkPaper(){
  const b=$('checkPaper');b.disabled=true;b.textContent='Consultando candle de fechamento...';
  try{const r=await fetch('/api/paper/status?id='+encodeURIComponent(currentTradeId)).then(v=>v.json());if(r.error)throw new Error(r.error);
  if(r.status==='SETTLED'){if(tradeCheckTimer){clearInterval(tradeCheckTimer);tradeCheckTimer=null;}
- if(r.result==='LOSS'&&r.g1Enabled&&!r.recovery&&r.recoveryStake){$('summary').innerHTML='<div class="ver warn">Primeira entrada LOSS. Abrindo G1 virtual calculada de R$ '+fmt(r.recoveryStake)+'...</div>';try{const g=await fetch('/api/paper/recovery',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:currentTradeId})}).then(v=>v.json());if(!g.id)throw new Error(g.error||'G1 não autorizada');currentTradeId=g.id;$('summary').innerHTML='<div class="k">RECUPERAÇÃO G1 AUTOMÁTICA · VIRTUAL</div><div class="big">'+esc(g.symbol)+' '+(g.direction==='CALL'?'CALL / COMPRA':'PUT / VENDA')+'</div><div class="k">Entrada G1: R$ '+fmt(g.stake)+' · Preço: '+fmt(g.entry)+'</div><div id="tradeStatus" class="ver warn">Aguardando fechamento da vela de recuperação...</div><button id="checkPaper">Verificar resultado</button>';$('checkPaper').onclick=checkPaper;tradeCheckTimer=setInterval(()=>checkPaper(true),5000);return;}catch(e){$('summary').innerHTML='<div class="ver bad">G1 não executada: '+esc(e.message)+'. Ciclo encerrado.</div>';return;}}
+ if(r.result==='LOSS'&&r.g1Enabled&&!r.recovery&&r.recoveryStake){$('summary').innerHTML='<div class="ver warn">A primeira entrada terminou em LOSS. A recuperação G1 calculada seria R$ '+fmt(r.recoveryStake)+'. Ela não será aberta automaticamente.</div><button id="approveG1">APROVAR G1 DEMO</button><button id="endCycle" class="secondary">Encerrar ciclo</button>';$('approveG1').onclick=async()=>{const btn=$('approveG1');btn.disabled=true;try{const g=await fetch('/api/paper/recovery',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:currentTradeId,confirmed:true})}).then(v=>v.json());if(!g.id)throw new Error(g.error||'G1 não autorizada');currentTradeId=g.id;$('summary').innerHTML='<div class="k">G1 VIRTUAL APROVADA POR VOCÊ</div><div class="big">'+esc(g.symbol)+' '+(g.direction==='CALL'?'CALL / COMPRA':'PUT / VENDA')+'</div><div class="k">Entrada G1: R$ '+fmt(g.stake)+' · Preço: '+fmt(g.entry)+'</div><div id="tradeStatus" class="ver warn">Aguardando fechamento da vela de recuperação...</div><button id="checkPaper">Verificar resultado</button>';$('checkPaper').onclick=checkPaper;tradeCheckTimer=setInterval(()=>checkPaper(true),5000);}catch(e){$('summary').insertAdjacentHTML('beforeend','<div class="ver bad">G1 cancelada: '+esc(e.message)+'</div>');}};$('endCycle').onclick=()=>{$('summary').innerHTML='<div class="ver warn">Ciclo encerrado. Nenhuma recuperação foi aberta.</div><button id="resume" class="secondary">Voltar a pesquisar</button>';$('resume').onclick=()=>{currentCandidate=null;currentTradeId=null;setState(true);scanOnce();};};return;}
  const label=r.result==='WIN'?'VITÓRIA':r.result==='LOSS'?'DERROTA':'EMPATE',cls=r.result==='WIN'?'ok':r.result==='LOSS'?'bad':'warn';
  const mood=r.result==='WIN'?'win':r.result==='LOSS'?'loss':'tie';
  const eyes=r.result==='LOSS'?'<path d="M82 57 l12 10 m0 -10 l-12 10 M116 57 l12 10 m0 -10 l-12 10" stroke="#ef6268" stroke-width="5" stroke-linecap="round"/>':'<circle cx="88" cy="62" r="6" fill="#d9f5ff"/><circle cx="122" cy="62" r="6" fill="#d9f5ff"/>';

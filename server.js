@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { run } = require('./backtest');
-const { ema, rsi, adx } = require('./indicators');
+const { ema, rsi, adx, macd, bollinger, atr, dmi } = require('./indicators');
 const journal = require('./journal');
 const PORT = process.env.PORT || 3000;
 const SYMBOLS = [
@@ -11,7 +11,7 @@ const SYMBOLS = [
   'DOTUSDT','LTCUSDT','BCHUSDT','UNIUSDT','ETCUSDT','NEARUSDT','APTUSDT','ARBUSDT','OPUSDT','ATOMUSDT',
   'ICPUSDT','FILUSDT','INJUSDT','SUIUSDT','SEIUSDT','SHIBUSDT','PEPEUSDT','AAVEUSDT','RENDERUSDT','XLMUSDT'
 ];
-const PAPER_SECRET = process.env.PAPER_TRADE_SECRET || 'backtest-opcoes-paper-trade-v1';
+const PAPER_SECRET = process.env.PAPER_TRADE_SECRET || crypto.randomBytes(32).toString('hex');
 function encodeTrade(trade){const payload=Buffer.from(JSON.stringify(trade)).toString('base64url');const sig=crypto.createHmac('sha256',PAPER_SECRET).update(payload).digest('base64url');return payload+'.'+sig;}
 function decodeTrade(token){try{const [payload,sig]=String(token||'').split('.');if(!payload||!sig)return null;const expected=crypto.createHmac('sha256',PAPER_SECRET).update(payload).digest();const received=Buffer.from(sig,'base64url');if(received.length!==expected.length||!crypto.timingSafeEqual(received,expected))return null;const trade=JSON.parse(Buffer.from(payload,'base64url').toString('utf8'));if(!trade.id||!SYMBOLS.includes(trade.symbol)||!['CALL','PUT'].includes(trade.direction))return null;return trade;}catch{return null;}}
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -73,15 +73,24 @@ async function klines(symbol,interval,total){
 const num=(v,d)=>v!==null&&v!==''&&Number.isFinite(+v)?+v:d;
 function params(q){return{expiry:Math.max(1,Math.min(10,num(q.get('expiry'),1))),payout:Math.max(1,Math.min(100,num(q.get('payout'),85))),adxMin:num(q.get('adxMin'),20),rsiLow:num(q.get('rsiLow'),40),rsiHigh:num(q.get('rsiHigh'),60)};}
 function signalFor(candles,P){
-  if(candles.length<80)return null;
-  const c=candles.map(x=>x.c),h=candles.map(x=>x.h),l=candles.map(x=>x.l);
-  const i=c.length-1,ef=ema(c,20),es=ema(c,50),R=rsi(c,14),A=adx(h,l,c,14);
-  if(ef[i]==null||es[i]==null||R[i]==null||A[i]==null)return null;
-  let direction=null;
-  if(ef[i]>es[i]&&A[i]>=P.adxMin&&R[i]<=P.rsiLow)direction='CALL';
-  else if(ef[i]<es[i]&&A[i]>=P.adxMin&&R[i]>=P.rsiHigh)direction='PUT';
-  if(!direction)return null;
-  return {direction,rsi:+R[i].toFixed(2),adx:+A[i].toFixed(2),ema20:+ef[i].toFixed(8),ema50:+es[i].toFixed(8),signalCandleTime:candles[i].t};
+ if(candles.length<80)return null;
+ const c=candles.map(x=>x.c),h=candles.map(x=>x.h),l=candles.map(x=>x.l),o=candles.map(x=>x.o);
+ const i=c.length-1,ef=ema(c,20),es=ema(c,50),R=rsi(c,14),A=adx(h,l,c,14),D=dmi(h,l,c,14),M=macd(c),B=bollinger(c,20,2),T=atr(h,l,c,14);
+ if([ef[i],es[i],R[i],A[i],D.plus[i],D.minus[i],M.line[i],M.signal[i],B.upper[i],B.lower[i],T[i]].some(v=>v==null))return null;
+ const direction=ef[i]>es[i]?'CALL':ef[i]<es[i]?'PUT':null;if(!direction||A[i]<P.adxMin)return null;
+ const range=Math.max(h[i]-l[i],1e-12),body=Math.abs(c[i]-o[i])/range,candleDir=c[i]>o[i]?'CALL':c[i]<o[i]?'PUT':null;
+ const dmiDir=D.plus[i]>D.minus[i]?'CALL':D.minus[i]>D.plus[i]?'PUT':null,macdDir=M.histogram[i]>0?'CALL':M.histogram[i]<0?'PUT':null;
+ const rsiDir=direction==='CALL'?(R[i]>=50&&R[i]<=P.rsiHigh?'CALL':null):(R[i]<=50&&R[i]>=P.rsiLow?'PUT':null);
+ const agreement=[direction,dmiDir,macdDir,rsiDir,candleDir].filter(x=>x===direction).length,score=agreement*20;if(agreement<4)return null;
+ const recentH=Math.max(...h.slice(Math.max(0,i-20),i)),recentL=Math.min(...l.slice(Math.max(0,i-20),i));
+ const resistanceGap=(recentH-c[i])/T[i],supportGap=(c[i]-recentL)/T[i];
+ if((direction==='CALL'&&resistanceGap>=0&&resistanceGap<0.25)||(direction==='PUT'&&supportGap>=0&&supportGap<0.25))return null;
+ return {direction,technicalScore:score,scoreLabel:'confluência técnica (não é probabilidade)',agreement,
+ rsi:+R[i].toFixed(2),adx:+A[i].toFixed(2),diPlus:+D.plus[i].toFixed(2),diMinus:+D.minus[i].toFixed(2),
+ ema20:+ef[i].toFixed(8),ema50:+es[i].toFixed(8),macd:+M.line[i].toFixed(8),macdSignal:+M.signal[i].toFixed(8),macdHistogram:+M.histogram[i].toFixed(8),
+ bollingerUpper:+B.upper[i].toFixed(8),bollingerMiddle:+B.mid[i].toFixed(8),bollingerLower:+B.lower[i].toFixed(8),
+ atr:+T[i].toFixed(8),volatilityPct:+(T[i]/c[i]*100).toFixed(4),candleBodyPct:+(body*100).toFixed(1),
+ support:+recentL.toFixed(8),resistance:+recentH.toFixed(8),signalCandleTime:candles[i].t};
 }
 function json(res,code,obj){res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(obj));}
 function readBody(req){return new Promise((resolve,reject)=>{let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{try{resolve(JSON.parse(raw||'{}'));}catch(e){reject(e);}});req.on('error',reject);});}
@@ -93,7 +102,9 @@ async function handle(req,res){
   return json(res,200,{stats,entries});
  }
  if(u.pathname==='/api/scan'&&req.method==='GET'){
-  const q=u.searchParams,interval=['1m','5m'].includes(q.get('interval'))?q.get('interval'):'1m';
+  const q=u.searchParams,market=(q.get('market')||'OPEN').toUpperCase();
+  if(market!=='OPEN')return json(res,409,{error:'OTC bloqueado: feed oficial não conectado; nenhum dado OPEN será usado como substituto.'});
+  const interval=['1m','5m'].includes(q.get('interval'))?q.get('interval'):'1m';
   const total=Math.max(500,Math.min(num(q.get('candles'),1000),10000)),P=params(q);
   const results=new Array(SYMBOLS.length);let cursor=0;
   async function worker(){while(true){const idx=cursor++;if(idx>=SYMBOLS.length)return;const symbol=SYMBOLS[idx];
@@ -106,8 +117,10 @@ async function handle(req,res){
   await Promise.all(results.map(x=>journal.save({id:'analysis:'+scanId+':'+x.symbol,kind:'analysis',scanId,createdAt:analyzedAt,symbol:x.symbol,interval,market:'OPEN',source:x.fonteDados||null,candles:x.candles||0,signal:x.signal||null,backtest:x.teste||null,error:x.erro||null})));
   const valid=results.filter(x=>!x.erro&&x.teste);
   const excluded=new Set((q.get('exclude')||'').split(',').map(x=>x.trim().toUpperCase()).filter(Boolean));
-  const candidates=valid.filter(x=>x.signal&&x.teste.entradas>=5&&!excluded.has(x.symbol));
+  const candidates=valid.filter(x=>x.signal&&x.teste.entradas>=100&&x.teste.intervalo95&&x.teste.intervalo95[0]>x.teste.pontoDeEquilibrio&&!excluded.has(x.symbol));
   candidates.sort((a,b)=>{
+    const score=(b.signal.technicalScore||0)-(a.signal.technicalScore||0);
+    if(score!==0)return score;
     const edge=(b.teste.esperancaPorEntrada||0)-(a.teste.esperancaPorEntrada||0);
     if(Math.abs(edge)>0.000001)return edge;
     return b.signal.signalCandleTime-a.signal.signalCandleTime;
@@ -119,10 +132,13 @@ async function handle(req,res){
  }
  if(u.pathname==='/api/paper/open'&&req.method==='POST'){
   const body=await readBody(req),symbol=String(body.symbol||'').toUpperCase(),direction=body.direction;
+  if(body.confirmed!==true||body.market!=='OPEN')return json(res,403,{error:'Entrada bloqueada: exige aprovação explícita e mercado OPEN.'});
   const interval=['1m','5m'].includes(body.interval)?body.interval:'1m',expiry=Math.max(1,Math.min(10,num(body.expiry,1))),payout=Math.max(1,Math.min(100,num(body.payout,85)));
   if(!SYMBOLS.includes(symbol)||!['CALL','PUT'].includes(direction))return json(res,400,{error:'Ativo ou direção inválidos.'});
   const data=await klines(symbol,interval,120),last=data.candles[data.candles.length-1];
   if(!last)return json(res,502,{error:'Sem candle fechado para iniciar a simulação.'});
+  const fresh=signalFor(data.candles,{adxMin:num(body.adxMin,20),rsiLow:num(body.rsiLow,40),rsiHigh:num(body.rsiHigh,60)});
+  if(!fresh||fresh.direction!==direction||Number(body.signalCandleTime)!==last.t)return json(res,409,{error:'Sinal expirou ou mudou. Entrada cancelada; pesquise novamente.'});
   const ms=intervalMs(interval),targetOpen=last.t+expiry*ms,settleAt=targetOpen+ms;
   const stake=Math.max(1,Math.min(1000,num(body.stake,5))),g1Enabled=body.g1Enabled===true;
   const trade={symbol,direction,interval,expiry,payout,entry:last.c,entryCandleTime:last.t,targetOpen,settleAt,source:data.source,status:'OPEN',createdAt:Date.now(),stake,g1Enabled,recovery:false,maxRecoveryMultiplier:2,targetExtra:stake*0.10};
@@ -130,8 +146,15 @@ async function handle(req,res){
   await journal.save({id:'operation:'+trade.id,kind:'operation',tradeId:trade.id,symbol,interval,market:'OPEN',direction,stake,payout,entry:trade.entry,source:trade.source,status:'OPEN',result:null,recovery:false,createdAt:trade.createdAt});
   return json(res,200,{...trade,virtual:true,message:'Operação virtual aberta. O identificador assinado permite recuperar a simulação mesmo após reinício do servidor.'});
  }
+ if(u.pathname==='/api/paper/reject'&&req.method==='POST'){
+  const body=await readBody(req),symbol=String(body.symbol||'').toUpperCase(),direction=body.direction;
+  if(!SYMBOLS.includes(symbol)||!['CALL','PUT'].includes(direction))return json(res,400,{error:'Oportunidade inválida.'});
+  await journal.save({id:'rejected:'+crypto.randomUUID(),kind:'rejected',symbol,direction,interval:['1m','5m'].includes(body.interval)?body.interval:'1m',market:'OPEN',reason:'cancelled_by_user',createdAt:Date.now()});
+  return json(res,200,{ok:true,message:'Cancelada e registrada como rejeitada, não como LOSS.'});
+ }
  if(u.pathname==='/api/paper/recovery'&&req.method==='POST'){
   const body=await readBody(req),parent=decodeTrade(body.id);
+  if(body.confirmed!==true)return json(res,403,{error:'G1 exige aprovação explícita antes de abrir.'});
   if(!parent||parent.recovery||!parent.g1Enabled)return json(res,400,{error:'Recuperação G1 não permitida.'});
   const settled=await klines(parent.symbol,parent.interval,Math.min(200,parent.expiry+5));
   const target=settled.candles.find(c=>c.t===parent.targetOpen);
@@ -141,11 +164,13 @@ async function handle(req,res){
   const stake=Math.ceil(((parent.stake+parent.targetExtra)/(parent.payout/100))*100)/100;
   if(stake>parent.stake*2)return json(res,409,{error:'G1 ultrapassaria o limite de 2x. Ciclo encerrado.',recoveryBlocked:true});
   const data=await klines(parent.symbol,parent.interval,120),last=data.candles[data.candles.length-1];
+  const fresh=signalFor(data.candles,{adxMin:20,rsiLow:40,rsiHigh:60});
+  if(!last||!fresh||fresh.direction!==parent.direction)return json(res,409,{error:'Sinal da G1 expirou ou mudou. Recuperação cancelada.'});
   const ms=intervalMs(parent.interval),targetOpen=last.t+parent.expiry*ms;
   const trade={symbol:parent.symbol,direction:parent.direction,interval:parent.interval,expiry:parent.expiry,payout:parent.payout,entry:last.c,entryCandleTime:last.t,targetOpen,settleAt:targetOpen+ms,source:data.source,status:'OPEN',createdAt:Date.now(),stake,g1Enabled:false,recovery:true,parentId:parent.id,maxRecoveryMultiplier:2,targetExtra:parent.targetExtra};
   trade.id=encodeTrade(trade);
   await journal.save({id:'operation:'+trade.id,kind:'operation',tradeId:trade.id,parentId:parent.id,symbol:trade.symbol,interval:trade.interval,market:'OPEN',direction:trade.direction,stake:trade.stake,payout:trade.payout,entry:trade.entry,source:trade.source,status:'OPEN',result:null,recovery:true,createdAt:trade.createdAt});
-  return json(res,200,{...trade,virtual:true,message:'G1 virtual aberta automaticamente; nenhuma ordem real foi enviada.'});
+  return json(res,200,{...trade,virtual:true,message:'G1 virtual aberta após aprovação explícita; nenhuma ordem real foi enviada.'});
  }
  if(u.pathname==='/api/paper/status'&&req.method==='GET'){
   const id=u.searchParams.get('id'),trade=decodeTrade(id);

@@ -77,34 +77,32 @@ async function list({ limit = 500, kind = null } = {}) {
   return local.filter(x => !kind || x.kind === kind).sort((a,b) => b.createdAt-a.createdAt).slice(0,n);
 }
 async function stats() {
-  const rows = await list({ limit: 2000 });
-  const outcomes = rows.filter(x => x.kind === 'operation' && ['WIN','LOSS','TIE'].includes(x.result));
-  const wins = outcomes.filter(x => x.result === 'WIN').length;
-  const losses = outcomes.filter(x => x.result === 'LOSS').length;
-  const ties = outcomes.filter(x => x.result === 'TIE').length;
-  const decided = wins + losses;
-  const byAsset = {};
-  for (const x of outcomes) {
-    const key = x.symbol || 'Desconhecido';
-    byAsset[key] ||= { wins: 0, losses: 0, ties: 0 };
-    if (x.result === 'WIN') byAsset[key].wins++;
-    else if (x.result === 'LOSS') byAsset[key].losses++;
-    else byAsset[key].ties++;
+  await init();
+  let totalRecords=0,analyses=0,opportunities=0,wins=0,losses=0,ties=0,byAsset={};
+  if(pool){
+    const totals=await pool.query(`SELECT COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE kind='analysis')::int AS analyses,
+      COUNT(*) FILTER (WHERE kind='opportunity')::int AS opportunities,
+      COUNT(*) FILTER (WHERE kind='operation' AND payload->>'result' IN ('WIN','LOSS','TIE'))::int AS operations,
+      COUNT(*) FILTER (WHERE kind='operation' AND payload->>'result'='WIN')::int AS wins,
+      COUNT(*) FILTER (WHERE kind='operation' AND payload->>'result'='LOSS')::int AS losses,
+      COUNT(*) FILTER (WHERE kind='operation' AND payload->>'result'='TIE')::int AS ties
+      FROM alpha_trade_journal WHERE created_at >= $1`,[cutoff()]);
+    const t=totals.rows[0];totalRecords=t.total;analyses=t.analyses;opportunities=t.opportunities;wins=t.wins;losses=t.losses;ties=t.ties;
+    const grouped=await pool.query(`SELECT payload->>'symbol' AS symbol,payload->>'result' AS result,COUNT(*)::int AS n
+      FROM alpha_trade_journal WHERE created_at >= $1 AND kind='operation' AND payload->>'result' IN ('WIN','LOSS','TIE')
+      GROUP BY payload->>'symbol',payload->>'result'`,[cutoff()]);
+    for(const row of grouped.rows){const key=row.symbol||'Desconhecido';byAsset[key] ||= {wins:0,losses:0,ties:0};if(row.result==='WIN')byAsset[key].wins=row.n;else if(row.result==='LOSS')byAsset[key].losses=row.n;else byAsset[key].ties=row.n;}
+  }else{
+    local=prune(local);await flush();totalRecords=local.length;
+    analyses=local.filter(x=>x.kind==='analysis').length;opportunities=local.filter(x=>x.kind==='opportunity').length;
+    const outcomes=local.filter(x=>x.kind==='operation'&&['WIN','LOSS','TIE'].includes(x.result));
+    wins=outcomes.filter(x=>x.result==='WIN').length;losses=outcomes.filter(x=>x.result==='LOSS').length;ties=outcomes.filter(x=>x.result==='TIE').length;
+    for(const x of outcomes){const key=x.symbol||'Desconhecido';byAsset[key] ||= {wins:0,losses:0,ties:0};if(x.result==='WIN')byAsset[key].wins++;else if(x.result==='LOSS')byAsset[key].losses++;else byAsset[key].ties++;}
   }
-  for (const v of Object.values(byAsset)) {
-    const d = v.wins + v.losses;
-    v.accuracy = d ? +(v.wins / d * 100).toFixed(2) : null;
-  }
-  return {
-    retentionDays: RETENTION_DAYS,
-    storage: pool ? 'postgresql' : 'local-temporario',
-    totalRecords: rows.length,
-    analyses: rows.filter(x => x.kind === 'analysis').length,
-    opportunities: rows.filter(x => x.kind === 'opportunity').length,
-    operations: outcomes.length,
-    wins, losses, ties,
-    accuracy: decided ? +(wins / decided * 100).toFixed(2) : null,
-    byAsset
-  };
+  for(const v of Object.values(byAsset)){const d=v.wins+v.losses;v.accuracy=d?+(v.wins/d*100).toFixed(2):null;}
+  const decided=wins+losses;
+  return {retentionDays:RETENTION_DAYS,storage:pool?'postgresql':'local-temporario',totalRecords,analyses,opportunities,
+    operations:wins+losses+ties,wins,losses,ties,accuracy:decided?+(wins/decided*100).toFixed(2):null,byAsset};
 }
 module.exports = { init, save, list, stats, retentionDays: RETENTION_DAYS };

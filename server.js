@@ -11,7 +11,7 @@ const SYMBOLS = [
   'DOTUSDT','LTCUSDT','BCHUSDT','UNIUSDT','ETCUSDT','NEARUSDT','APTUSDT','ARBUSDT','OPUSDT','ATOMUSDT',
   'ICPUSDT','FILUSDT','INJUSDT','SUIUSDT','SEIUSDT','SHIBUSDT','PEPEUSDT','AAVEUSDT','RENDERUSDT','XLMUSDT'
 ];
-const PAPER_SECRET = process.env.PAPER_TRADE_SECRET || 'backtest-opcoes-paper-trade-v1';
+const PAPER_SECRET = process.env.PAPER_TRADE_SECRET || crypto.randomBytes(32).toString('hex');
 function encodeTrade(trade){const payload=Buffer.from(JSON.stringify(trade)).toString('base64url');const sig=crypto.createHmac('sha256',PAPER_SECRET).update(payload).digest('base64url');return payload+'.'+sig;}
 function decodeTrade(token){try{const [payload,sig]=String(token||'').split('.');if(!payload||!sig)return null;const expected=crypto.createHmac('sha256',PAPER_SECRET).update(payload).digest();const received=Buffer.from(sig,'base64url');if(received.length!==expected.length||!crypto.timingSafeEqual(received,expected))return null;const trade=JSON.parse(Buffer.from(payload,'base64url').toString('utf8'));if(!trade.id||!SYMBOLS.includes(trade.symbol)||!['CALL','PUT'].includes(trade.direction))return null;return trade;}catch{return null;}}
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -154,6 +154,7 @@ async function handle(req,res){
  }
  if(u.pathname==='/api/paper/recovery'&&req.method==='POST'){
   const body=await readBody(req),parent=decodeTrade(body.id);
+  if(body.confirmed!==true)return json(res,403,{error:'G1 exige aprovação explícita antes de abrir.'});
   if(!parent||parent.recovery||!parent.g1Enabled)return json(res,400,{error:'Recuperação G1 não permitida.'});
   const settled=await klines(parent.symbol,parent.interval,Math.min(200,parent.expiry+5));
   const target=settled.candles.find(c=>c.t===parent.targetOpen);
@@ -163,11 +164,13 @@ async function handle(req,res){
   const stake=Math.ceil(((parent.stake+parent.targetExtra)/(parent.payout/100))*100)/100;
   if(stake>parent.stake*2)return json(res,409,{error:'G1 ultrapassaria o limite de 2x. Ciclo encerrado.',recoveryBlocked:true});
   const data=await klines(parent.symbol,parent.interval,120),last=data.candles[data.candles.length-1];
+  const fresh=signalFor(data.candles,{adxMin:20,rsiLow:40,rsiHigh:60});
+  if(!last||!fresh||fresh.direction!==parent.direction)return json(res,409,{error:'Sinal da G1 expirou ou mudou. Recuperação cancelada.'});
   const ms=intervalMs(parent.interval),targetOpen=last.t+parent.expiry*ms;
   const trade={symbol:parent.symbol,direction:parent.direction,interval:parent.interval,expiry:parent.expiry,payout:parent.payout,entry:last.c,entryCandleTime:last.t,targetOpen,settleAt:targetOpen+ms,source:data.source,status:'OPEN',createdAt:Date.now(),stake,g1Enabled:false,recovery:true,parentId:parent.id,maxRecoveryMultiplier:2,targetExtra:parent.targetExtra};
   trade.id=encodeTrade(trade);
   await journal.save({id:'operation:'+trade.id,kind:'operation',tradeId:trade.id,parentId:parent.id,symbol:trade.symbol,interval:trade.interval,market:'OPEN',direction:trade.direction,stake:trade.stake,payout:trade.payout,entry:trade.entry,source:trade.source,status:'OPEN',result:null,recovery:true,createdAt:trade.createdAt});
-  return json(res,200,{...trade,virtual:true,message:'G1 virtual aberta automaticamente; nenhuma ordem real foi enviada.'});
+  return json(res,200,{...trade,virtual:true,message:'G1 virtual aberta após aprovação explícita; nenhuma ordem real foi enviada.'});
  }
  if(u.pathname==='/api/paper/status'&&req.method==='GET'){
   const id=u.searchParams.get('id'),trade=decodeTrade(id);
